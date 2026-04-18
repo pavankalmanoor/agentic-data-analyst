@@ -1,0 +1,814 @@
+{
+  "dataset": {
+    "name": "Olist Brazilian E-Commerce",
+    "description": "Public dataset of transactions from Olist, a Brazilian e-commerce platform. Contains order, item, payment, review, customer, product, and seller data spanning September 2016 to October 2018.",
+    "time_coverage": "2016-09-04 to 2018-10-17",
+    "row_counts_summary": {
+      "olist_orders_dataset": 99441,
+      "olist_order_items_dataset": 112650,
+      "olist_order_payments_dataset": 103886,
+      "olist_order_reviews_dataset": 99224,
+      "olist_customers_dataset": 99441,
+      "olist_products_dataset": 32951,
+      "olist_sellers_dataset": 3095,
+      "product_category_name_translation": 71
+    }
+  },
+  "tables": {
+    "olist_orders_dataset": {
+      "purpose": "Core order records, one row per order placed by a customer.",
+      "grain": {
+        "level": "order",
+        "description": "One row represents a single order from a customer, with timestamps and delivery status.",
+        "duplicates_possible": false,
+        "unique_on": [
+          "order_id"
+        ]
+      },
+      "primary_key": "order_id",
+      "foreign_keys": [
+        {
+          "column": "customer_id",
+          "references": "olist_customers_dataset.customer_id",
+          "cardinality": "many-to-one"
+        }
+      ],
+      "columns": {
+        "order_id": {
+          "type": "character varying(64)",
+          "semantics": "Unique identifier for the order.",
+          "nullable": false,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "customer_id": {
+          "type": "character varying(64)",
+          "semantics": "Foreign key to the customer who placed the order. Use this to join orders \u2192 customers. For 'unique customers', use customer_unique_id instead.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": "Two customer ID columns exist: customer_id (order-level identifier, 99,441 distinct) and customer_unique_id (person-level, 96,096 distinct). Use customer_id for joins; use customer_unique_id to count unique people or identify repeat buyers."
+        },
+        "order_status": {
+          "type": "character varying(32)",
+          "semantics": "Status of the order (8 values: delivered, shipped, canceled, unavailable, invoiced, processing, created, approved).",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": "Revenue questions must pick a convention: booked revenue excludes only 'canceled' and 'unavailable'; realized revenue includes only 'delivered'. Default to booked unless question explicitly references delivery/shipping/fulfillment."
+        },
+        "order_purchase_timestamp": {
+          "type": "timestamp without time zone",
+          "semantics": "Date and time when the customer placed the order.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "order_approved_at": {
+          "type": "timestamp without time zone",
+          "semantics": "Date and time when the order was approved (payment confirmed).",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "order_delivered_carrier_date": {
+          "type": "timestamp without time zone",
+          "semantics": "Date and time when the carrier picked up the order from the seller.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "order_delivered_customer_date": {
+          "type": "timestamp without time zone",
+          "semantics": "Date and time when the customer received the order.",
+          "nullable": true,
+          "null_rate_note": "NULL for ~3% of orders; always NULL unless order_status = 'delivered'.",
+          "gotchas": "Use this column for delivery-performance questions, filtering to order_status = 'delivered' and non-null values."
+        },
+        "order_estimated_delivery_date": {
+          "type": "timestamp without time zone",
+          "semantics": "Promised delivery date (set at order time).",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        }
+      },
+      "common_joins": [
+        {
+          "join_to": "olist_customers_dataset",
+          "on": "olist_orders_dataset.customer_id = olist_customers_dataset.customer_id",
+          "type": "left",
+          "note": "Get customer demographics and location"
+        },
+        {
+          "join_to": "olist_order_items_dataset",
+          "on": "olist_orders_dataset.order_id = olist_order_items_dataset.order_id",
+          "type": "left",
+          "note": "Get items, product details, seller info for the order"
+        },
+        {
+          "join_to": "olist_order_payments_dataset",
+          "on": "olist_orders_dataset.order_id = olist_order_payments_dataset.order_id",
+          "type": "left",
+          "note": "Get payment method and amount"
+        },
+        {
+          "join_to": "olist_order_reviews_dataset",
+          "on": "olist_orders_dataset.order_id = olist_order_reviews_dataset.order_id",
+          "type": "left",
+          "note": "Get customer review and rating for the order"
+        }
+      ],
+      "aggregation_notes": [
+        "Sum order-level metrics (order_value, etc.) without grouping; each order_id appears once.",
+        "To count orders by status, use COUNT(*) GROUP BY order_status (will not double-count)."
+      ],
+      "typical_questions": [
+        "How many orders in a time period?",
+        "What is the order status distribution?",
+        "What is the on-time delivery rate?",
+        "How long does delivery take?"
+      ]
+    },
+    "olist_order_items_dataset": {
+      "purpose": "Line items (products) within each order, with price and freight.",
+      "grain": {
+        "level": "order-item",
+        "description": "One row represents a single line item (product SKU) within an order. An order may have multiple rows.",
+        "duplicates_possible": true,
+        "unique_on": [
+          "order_id",
+          "order_item_id"
+        ]
+      },
+      "primary_key": "[order_id, order_item_id]",
+      "foreign_keys": [
+        {
+          "column": "order_id",
+          "references": "olist_orders_dataset.order_id",
+          "cardinality": "many-to-one"
+        },
+        {
+          "column": "product_id",
+          "references": "olist_products_dataset.product_id",
+          "cardinality": "many-to-one"
+        },
+        {
+          "column": "seller_id",
+          "references": "olist_sellers_dataset.seller_id",
+          "cardinality": "many-to-one"
+        }
+      ],
+      "columns": {
+        "order_id": {
+          "type": "character varying(64)",
+          "semantics": "Foreign key to the order.",
+          "nullable": false,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "order_item_id": {
+          "type": "integer",
+          "semantics": "Sequence number of this line item within the order (1, 2, 3, ...). NOT a quantity column.",
+          "nullable": false,
+          "null_rate_note": null,
+          "gotchas": "order_item_id is a line-item sequence counter, NOT quantity. SUM(price * order_item_id) is a bug. Correct revenue per order is SUM(price) GROUP BY order_id."
+        },
+        "product_id": {
+          "type": "character varying(64)",
+          "semantics": "Foreign key to the product.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "seller_id": {
+          "type": "character varying(64)",
+          "semantics": "Foreign key to the seller who supplied this item.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "shipping_limit_date": {
+          "type": "timestamp without time zone",
+          "semantics": "Deadline for the seller to ship the item.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "price": {
+          "type": "numeric(12,2)",
+          "semantics": "Unit price of the product (merchandise only, excludes freight).",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "freight_value": {
+          "type": "numeric(12,2)",
+          "semantics": "Shipping cost for this line item.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": "freight_value is stored here, NOT in payments. Total billed per order = SUM(order_items.price) + SUM(order_items.freight_value). This will differ from SUM(payments.payment_value) by ~0.02% due to rounding on installments/vouchers."
+        }
+      },
+      "common_joins": [
+        {
+          "join_to": "olist_products_dataset",
+          "on": "olist_order_items_dataset.product_id = olist_products_dataset.product_id",
+          "type": "left",
+          "note": "Get product name, category, and dimensions"
+        },
+        {
+          "join_to": "olist_sellers_dataset",
+          "on": "olist_order_items_dataset.seller_id = olist_sellers_dataset.seller_id",
+          "type": "left",
+          "note": "Get seller location and id"
+        },
+        {
+          "join_to": "product_category_name_translation",
+          "on": "olist_products_dataset.product_category_name = product_category_name_translation.product_category_name",
+          "type": "left",
+          "note": "Get English translation of Portuguese product category"
+        },
+        {
+          "join_to": "olist_orders_dataset",
+          "on": "olist_order_items_dataset.order_id = olist_orders_dataset.order_id",
+          "type": "left",
+          "note": "Get order status and delivery dates"
+        }
+      ],
+      "aggregation_notes": [
+        "Merchandise revenue = SUM(price) GROUP BY order_id or by time period.",
+        "Total revenue with freight = SUM(price) + SUM(freight_value) GROUP BY order_id.",
+        "Average item price = SUM(price) / COUNT(*) or AVG(price) (valid both ways).",
+        "Revenue by product = SUM(price) GROUP BY product_id.",
+        "Revenue by seller = SUM(price) GROUP BY seller_id."
+      ],
+      "typical_questions": [
+        "What is the total revenue per order?",
+        "What products are best sellers?",
+        "What is the average order size (items per order)?",
+        "Which sellers have the most revenue?",
+        "What is the average freight cost?"
+      ]
+    },
+    "olist_order_payments_dataset": {
+      "purpose": "Payment records for orders, one or more rows per order depending on method and installments.",
+      "grain": {
+        "level": "payment-row",
+        "description": "One row represents a single payment row for an order. Orders may have 1+ rows (installments, mixed payment methods, or both).",
+        "duplicates_possible": true,
+        "unique_on": [
+          "order_id",
+          "payment_sequential"
+        ]
+      },
+      "primary_key": "[order_id, payment_sequential]",
+      "foreign_keys": [
+        {
+          "column": "order_id",
+          "references": "olist_orders_dataset.order_id",
+          "cardinality": "many-to-one"
+        }
+      ],
+      "columns": {
+        "order_id": {
+          "type": "character varying(64)",
+          "semantics": "Foreign key to the order.",
+          "nullable": false,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "payment_sequential": {
+          "type": "integer",
+          "semantics": "Sequence number of this payment within the order (1, 2, ...). Not all orders have multiple payments.",
+          "nullable": false,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "payment_type": {
+          "type": "character varying(32)",
+          "semantics": "Method of payment (5 values: credit_card, boleto, voucher, debit_card, not_defined).",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": "payment_type has 5 values including 'not_defined' (3 rows with payment_value = $0.00). Filter out 'not_defined' for any revenue or payment-count question."
+        },
+        "payment_installments": {
+          "type": "integer",
+          "semantics": "Number of installments for this payment (1 = full, >1 = split across N months).",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "payment_value": {
+          "type": "numeric(12,2)",
+          "semantics": "Amount paid in this payment row. Includes freight and merchandise.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": "payment_value INCLUDES freight. order_items.price does NOT. SUM(payment_value) = total paid across all payment rows in an order. SUM(order_items.price) + SUM(order_items.freight_value) = total billed. These differ by ~0.02% due to voucher/installment rounding, not an error."
+        }
+      },
+      "common_joins": [
+        {
+          "join_to": "olist_orders_dataset",
+          "on": "olist_order_payments_dataset.order_id = olist_orders_dataset.order_id",
+          "type": "left",
+          "note": "Get order status and dates"
+        }
+      ],
+      "aggregation_notes": [
+        "Total revenue paid = SUM(payment_value) GROUP BY order_id (or unfiltered for dataset total).",
+        "Do NOT group by payment_type then sum; an order with mixed methods will be double-counted.",
+        "To find orders using each method: COUNT(DISTINCT order_id) GROUP BY payment_type (counts orders, not payment rows).",
+        "For installment analysis: COUNT(*) GROUP BY payment_installments gives payment-row counts; divide by installment count to get order count."
+      ],
+      "typical_questions": [
+        "What is total revenue?",
+        "What payment methods are used?",
+        "What fraction of orders use installments?",
+        "How many installments do customers choose on average?"
+      ]
+    },
+    "olist_order_reviews_dataset": {
+      "purpose": "Customer reviews and satisfaction ratings for orders.",
+      "grain": {
+        "level": "review",
+        "description": "One row represents a review (potentially from a repeat reviewer) for a specific order. Composite key on (review_id, order_id).",
+        "duplicates_possible": true,
+        "unique_on": [
+          "review_id",
+          "order_id"
+        ]
+      },
+      "primary_key": "[review_id, order_id]",
+      "foreign_keys": [
+        {
+          "column": "order_id",
+          "references": "olist_orders_dataset.order_id",
+          "cardinality": "many-to-one"
+        }
+      ],
+      "columns": {
+        "review_id": {
+          "type": "character varying(64)",
+          "semantics": "Identifier for the review. NOT unique on its own; one reviewer can submit the same review_id for multiple orders.",
+          "nullable": false,
+          "null_rate_note": null,
+          "gotchas": "review_id is NOT unique by itself. Composite primary key is (review_id, order_id). Do NOT use review_id alone to deduplicate."
+        },
+        "order_id": {
+          "type": "character varying(64)",
+          "semantics": "Foreign key to the order being reviewed.",
+          "nullable": false,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "review_score": {
+          "type": "integer",
+          "semantics": "Rating from 1 (worst) to 5 (best), integer.",
+          "nullable": true,
+          "null_rate_note": "Zero nulls in this dataset.",
+          "gotchas": "Distribution is heavily skewed: ~57.8% of reviews are 5-star. AVG(review_score) is almost always ~4.0\u20134.1 and rarely informative. Prefer reporting the full distribution or the fraction of 1\u20132 scores ('detractors') for satisfaction analysis."
+        },
+        "review_comment_title": {
+          "type": "text",
+          "semantics": "Short text title/headline of the review.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "review_comment_message": {
+          "type": "text",
+          "semantics": "Full text message of the review.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "review_creation_date": {
+          "type": "timestamp without time zone",
+          "semantics": "Date and time when the customer submitted the review.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "review_answer_timestamp": {
+          "type": "timestamp without time zone",
+          "semantics": "Date and time when the seller responded to the review.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        }
+      },
+      "common_joins": [
+        {
+          "join_to": "olist_orders_dataset",
+          "on": "olist_order_reviews_dataset.order_id = olist_orders_dataset.order_id",
+          "type": "left",
+          "note": "Get order status and delivery dates"
+        }
+      ],
+      "aggregation_notes": [
+        "Average review score = AVG(review_score). Note: heavily skewed to 5-star; distributions are more informative.",
+        "Count of reviews = COUNT(*). Most orders have a review; some do not.",
+        "Distribution of scores = COUNT(*) GROUP BY review_score.",
+        "Detractor rate = COUNT(*) FILTER (review_score IN (1, 2)) / COUNT(*) * 100."
+      ],
+      "typical_questions": [
+        "What is the average review score?",
+        "What is the distribution of star ratings?",
+        "What fraction of reviews are 1 or 2 stars?",
+        "Do delivered orders have higher ratings than shipped orders?"
+      ]
+    },
+    "olist_customers_dataset": {
+      "purpose": "Customer master data including location and identifier mapping.",
+      "grain": {
+        "level": "order-customer",
+        "description": "One row per order placed (customer_id is order-level). Multiple rows can share the same customer_unique_id (repeat customers).",
+        "duplicates_possible": true,
+        "unique_on": [
+          "customer_id"
+        ]
+      },
+      "primary_key": "customer_id",
+      "foreign_keys": [],
+      "columns": {
+        "customer_id": {
+          "type": "character varying(64)",
+          "semantics": "Unique identifier per order. Use this to join orders \u2192 customers.",
+          "nullable": false,
+          "null_rate_note": null,
+          "gotchas": "customer_id is 1:1 with orders (99,441 distinct). Do NOT use it to count unique customers; use customer_unique_id instead."
+        },
+        "customer_unique_id": {
+          "type": "character varying(64)",
+          "semantics": "Unique identifier per person (96,096 distinct). Use this to identify repeat customers or count unique people.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": "This is the person-level ID. customer_unique_id is many-to-one with customer_id. Use COUNT(DISTINCT customer_unique_id) for 'unique customers', NOT COUNT(DISTINCT customer_id)."
+        },
+        "customer_zip_code_prefix": {
+          "type": "character varying(16)",
+          "semantics": "Prefix of the customer's postal code.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": "Partial zip code (prefix only), not full postal code. No latitude/longitude."
+        },
+        "customer_city": {
+          "type": "text",
+          "semantics": "City name (in Portuguese) where the customer is located.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": "Geographic fields are strings only; no coordinates or distance calculations possible without the missing geolocation table."
+        },
+        "customer_state": {
+          "type": "character varying(4)",
+          "semantics": "State abbreviation (e.g., 'SP', 'RJ') where the customer is located.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        }
+      },
+      "common_joins": [
+        {
+          "join_to": "olist_orders_dataset",
+          "on": "olist_customers_dataset.customer_id = olist_orders_dataset.customer_id",
+          "type": "inner",
+          "note": "Get customer details for every order"
+        }
+      ],
+      "aggregation_notes": [
+        "To count unique customers = COUNT(DISTINCT customer_unique_id), NOT COUNT(DISTINCT customer_id).",
+        "Orders per unique customer = COUNT(*) GROUP BY customer_unique_id / COUNT(DISTINCT customer_unique_id).",
+        "Repeat customer rate = (COUNT(DISTINCT customer_unique_id) with >1 order) / COUNT(DISTINCT customer_unique_id)."
+      ],
+      "typical_questions": [
+        "How many unique customers?",
+        "What fraction of customers are repeat buyers?",
+        "Which states have the most customers?",
+        "What is the average orders per customer?"
+      ]
+    },
+    "olist_products_dataset": {
+      "purpose": "Product master data including category, name length, description, photos, and physical dimensions.",
+      "grain": {
+        "level": "product",
+        "description": "One row per unique product (SKU). Physical attributes and category are static.",
+        "duplicates_possible": false,
+        "unique_on": [
+          "product_id"
+        ]
+      },
+      "primary_key": "product_id",
+      "foreign_keys": [],
+      "columns": {
+        "product_id": {
+          "type": "character varying(64)",
+          "semantics": "Unique identifier for the product.",
+          "nullable": false,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "product_category_name": {
+          "type": "character varying(128)",
+          "semantics": "Category name in Portuguese. Join to product_category_name_translation for English.",
+          "nullable": true,
+          "null_rate_note": "610 products have NULL category.",
+          "gotchas": "product_category_name is in Portuguese. 610 products (~1.8%) have NULL category. Two categories have NO English translation: 'pc_gamer' (3 products) and 'portateis_cozinha_e_preparadores_de_alimentos' (10 products). Always join to product_category_name_translation for English; filter NULLs if needed."
+        },
+        "product_name_lenght": {
+          "type": "integer",
+          "semantics": "Character count of the product name (note: column name has typo 'lenght').",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "product_description_lenght": {
+          "type": "integer",
+          "semantics": "Character count of the product description (note: column name has typo 'lenght').",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "product_photos_qty": {
+          "type": "integer",
+          "semantics": "Number of product photos in the listing.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "product_weight_g": {
+          "type": "integer",
+          "semantics": "Product weight in grams.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "product_length_cm": {
+          "type": "integer",
+          "semantics": "Product length in centimeters.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "product_height_cm": {
+          "type": "integer",
+          "semantics": "Product height in centimeters.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "product_width_cm": {
+          "type": "integer",
+          "semantics": "Product width in centimeters.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        }
+      },
+      "common_joins": [
+        {
+          "join_to": "olist_order_items_dataset",
+          "on": "olist_products_dataset.product_id = olist_order_items_dataset.product_id",
+          "type": "left",
+          "note": "Get sales and revenue per product"
+        },
+        {
+          "join_to": "product_category_name_translation",
+          "on": "olist_products_dataset.product_category_name = product_category_name_translation.product_category_name",
+          "type": "left",
+          "note": "Get English category translation"
+        }
+      ],
+      "aggregation_notes": [
+        "Revenue per product = SUM(order_items.price) GROUP BY product_id.",
+        "Best-selling products = COUNT(*) GROUP BY product_id ORDER BY COUNT DESC.",
+        "Average product weight/dimensions = AVG(product_weight_g), etc."
+      ],
+      "typical_questions": [
+        "Which products are best sellers by revenue or volume?",
+        "What is the average product weight or size?",
+        "Which categories are most popular?",
+        "How do products with more photos perform?"
+      ]
+    },
+    "olist_sellers_dataset": {
+      "purpose": "Seller master data including geographic location.",
+      "grain": {
+        "level": "seller",
+        "description": "One row per seller (vendor). Static location data.",
+        "duplicates_possible": false,
+        "unique_on": [
+          "seller_id"
+        ]
+      },
+      "primary_key": "seller_id",
+      "foreign_keys": [],
+      "columns": {
+        "seller_id": {
+          "type": "character varying(64)",
+          "semantics": "Unique identifier for the seller.",
+          "nullable": false,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "seller_zip_code_prefix": {
+          "type": "character varying(16)",
+          "semantics": "Prefix of the seller's postal code.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": "Partial zip code (prefix only), not full postal code. No latitude/longitude."
+        },
+        "seller_city": {
+          "type": "text",
+          "semantics": "City name (in Portuguese) where the seller is located.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": "Geographic fields are strings only; no coordinates or distance calculations possible without the missing geolocation table."
+        },
+        "seller_state": {
+          "type": "character varying(4)",
+          "semantics": "State abbreviation (e.g., 'SP', 'RJ') where the seller is located.",
+          "nullable": true,
+          "null_rate_note": null,
+          "gotchas": null
+        }
+      },
+      "common_joins": [
+        {
+          "join_to": "olist_order_items_dataset",
+          "on": "olist_sellers_dataset.seller_id = olist_order_items_dataset.seller_id",
+          "type": "left",
+          "note": "Get sales and revenue per seller"
+        }
+      ],
+      "aggregation_notes": [
+        "Revenue per seller = SUM(order_items.price) GROUP BY seller_id.",
+        "Items sold per seller = COUNT(*) GROUP BY seller_id.",
+        "Seller count = COUNT(DISTINCT seller_id)."
+      ],
+      "typical_questions": [
+        "Which sellers have the most revenue?",
+        "How many sellers are there?",
+        "Which states have the most sellers?",
+        "What is the average order volume per seller?"
+      ]
+    },
+    "product_category_name_translation": {
+      "purpose": "Mapping of Portuguese product category names to English translations.",
+      "grain": {
+        "level": "category",
+        "description": "One row per product category in the Portuguese dataset, with English translation (if available).",
+        "duplicates_possible": false,
+        "unique_on": [
+          "product_category_name"
+        ]
+      },
+      "primary_key": "product_category_name",
+      "foreign_keys": [],
+      "columns": {
+        "product_category_name": {
+          "type": "character varying(128)",
+          "semantics": "Category name in Portuguese (matches olist_products_dataset.product_category_name).",
+          "nullable": false,
+          "null_rate_note": null,
+          "gotchas": null
+        },
+        "product_category_name_english": {
+          "type": "character varying(128)",
+          "semantics": "English translation of the category name.",
+          "nullable": true,
+          "null_rate_note": "Two Portuguese categories have NO English translation: 'pc_gamer' and 'portateis_cozinha_e_preparadores_de_alimentos'.",
+          "gotchas": "Two categories lack translations. If your analysis requires English names, filter WHERE product_category_name_english IS NOT NULL, or handle the NULL cases separately."
+        }
+      },
+      "common_joins": [
+        {
+          "join_to": "olist_products_dataset",
+          "on": "product_category_name_translation.product_category_name = olist_products_dataset.product_category_name",
+          "type": "left",
+          "note": "Get English category names for reporting"
+        }
+      ],
+      "aggregation_notes": [
+        "This is a reference table; aggregation is rare. Use it to translate category names before grouping."
+      ],
+      "typical_questions": [
+        "What is the English name for a Portuguese category?"
+      ]
+    }
+  },
+  "cardinalities": {
+    "orders_to_order_items": "one-to-many (one order has 1+ items)",
+    "orders_to_order_payments": "one-to-many (one order has 1+ payment rows)",
+    "orders_to_order_reviews": "one-to-many (one order has 0\u20131 reviews typically)",
+    "customers_to_orders": "one-to-many (one customer_unique_id has 1+ orders)",
+    "customer_id_to_orders": "one-to-one (customer_id is order-level; 99,441 distinct vs 99,441 orders)",
+    "customer_unique_id_to_customer_id": "one-to-many (one person can place multiple orders)",
+    "products_to_order_items": "one-to-many (one product in many orders)",
+    "sellers_to_order_items": "one-to-many (one seller in many orders)",
+    "categories_to_products": "one-to-many (one category has many products)"
+  },
+  "canonical_metrics": {
+    "revenue": {
+      "description": "Total monetary value of orders, with multiple valid definitions depending on what you measure.",
+      "definitions": [
+        {
+          "name": "revenue_from_payments",
+          "sql_sketch": "SELECT SUM(olist_order_payments_dataset.payment_value) FROM olist_order_payments_dataset WHERE olist_order_payments_dataset.payment_type <> 'not_defined' GROUP BY ... (or unfiltered for dataset total)",
+          "use_when": "You want total cash received (includes freight, installment-adjusted). Use for cash flow and payment reconciliation. Filter payment_type <> 'not_defined' to exclude 3 zero-value placeholder rows."
+        },
+        {
+          "name": "revenue_from_items_and_freight",
+          "sql_sketch": "SELECT SUM(olist_order_items_dataset.price) + SUM(olist_order_items_dataset.freight_value) FROM olist_order_items_dataset GROUP BY ... (or unfiltered for dataset total)",
+          "use_when": "You want total billed to customers (merchandise + shipping). Use for sales and revenue recognition. Differs from payment_value by ~0.02% due to voucher/installment rounding (not an error)."
+        },
+        {
+          "name": "merchandise_revenue",
+          "sql_sketch": "SELECT SUM(olist_order_items_dataset.price) FROM olist_order_items_dataset GROUP BY ... (or unfiltered for dataset total)",
+          "use_when": "You want revenue excluding freight. Use for product-level or category-level analysis where shipping is not relevant."
+        }
+      ],
+      "expected_delta": "~0.02% between payment-based and item-based revenue due to rounding on installments and vouchers. Deltas >0.5% indicate a data quality issue."
+    },
+    "unique_customers": {
+      "description": "Count of distinct individuals (people) who made purchases, identified by customer_unique_id.",
+      "definitions": [
+        {
+          "name": "unique_customers_correct",
+          "sql_sketch": "SELECT COUNT(DISTINCT olist_customers_dataset.customer_unique_id) FROM olist_customers_dataset",
+          "use_when": "Always. This is the person-level unique count (96,096 total)."
+        },
+        {
+          "name": "unique_customers_wrong_pattern",
+          "sql_sketch": "SELECT COUNT(DISTINCT olist_customers_dataset.customer_id) FROM olist_customers_dataset",
+          "use_when": "NEVER. This returns the count of orders (99,441), not unique people, because customer_id is order-level."
+        }
+      ],
+      "expected_delta": "There is no delta; use only the first definition. The second is a common mistake."
+    },
+    "avg_delivery_days": {
+      "description": "Average number of days from order placement to customer delivery, for delivered orders only.",
+      "definitions": [
+        {
+          "name": "avg_delivery_days_delivered_only",
+          "sql_sketch": "SELECT AVG(EXTRACT(DAY FROM (olist_orders_dataset.order_delivered_customer_date - olist_orders_dataset.order_purchase_timestamp))) FROM olist_orders_dataset WHERE olist_orders_dataset.order_status = 'delivered' AND olist_orders_dataset.order_delivered_customer_date IS NOT NULL",
+          "use_when": "Always use this for delivery time analysis. Filter to order_status = 'delivered' and non-null delivered_customer_date to avoid ~3% of orders with NULL delivery date."
+        }
+      ],
+      "expected_delta": "No alternative definition."
+    },
+    "on_time_delivery_rate": {
+      "description": "Fraction of delivered orders that arrived on or before the estimated delivery date.",
+      "definitions": [
+        {
+          "name": "on_time_delivery_rate",
+          "sql_sketch": "SELECT COUNT(*) FILTER (olist_orders_dataset.order_delivered_customer_date <= olist_orders_dataset.order_estimated_delivery_date) * 100.0 / COUNT(*) FROM olist_orders_dataset WHERE olist_orders_dataset.order_status = 'delivered' AND olist_orders_dataset.order_delivered_customer_date IS NOT NULL",
+          "use_when": "Always. Filter to delivered orders with non-null delivery date. Result is a percentage (0\u2013100)."
+        }
+      ],
+      "expected_delta": "No alternative definition."
+    },
+    "repeat_customer_rate": {
+      "description": "Fraction of unique customers who placed more than one order.",
+      "definitions": [
+        {
+          "name": "repeat_customer_rate",
+          "sql_sketch": "SELECT COUNT(DISTINCT CASE WHEN customer_order_count > 1 THEN customer_unique_id END) * 100.0 / COUNT(DISTINCT customer_unique_id) FROM (SELECT olist_customers_dataset.customer_unique_id, COUNT(*) as customer_order_count FROM olist_customers_dataset GROUP BY customer_unique_id)",
+          "use_when": "To measure loyalty and repeat-purchase behavior."
+        }
+      ],
+      "expected_delta": "No alternative definition."
+    },
+    "average_order_value": {
+      "description": "Mean monetary value per order (total paid or total billed, depending on choice).",
+      "definitions": [
+        {
+          "name": "aov_from_payments",
+          "sql_sketch": "SELECT SUM(olist_order_payments_dataset.payment_value) / COUNT(DISTINCT olist_order_payments_dataset.order_id) FROM olist_order_payments_dataset WHERE olist_order_payments_dataset.payment_type <> 'not_defined'",
+          "use_when": "Cash-focused; includes freight."
+        },
+        {
+          "name": "aov_from_items",
+          "sql_sketch": "SELECT (SUM(olist_order_items_dataset.price) + SUM(olist_order_items_dataset.freight_value)) / COUNT(DISTINCT olist_order_items_dataset.order_id) FROM olist_order_items_dataset",
+          "use_when": "Billing-focused; includes freight. Slightly differs from payment-based due to rounding (~0.02%)."
+        }
+      ],
+      "expected_delta": "~0.02% due to rounding."
+    }
+  },
+  "cross_table_gotchas": [
+    "order_items and order_payments both contribute to order value but store it differently. order_items.price excludes freight; order_payments.payment_value includes it. order_items.freight_value holds shipping separately. Computing total revenue two ways will legitimately differ by ~0.02% (voucher/installment rounding), not by the full freight amount.",
+    "order_status is in orders; reviews exist even for non-delivered orders (some shipped/canceled orders have reviews). Do not assume reviews only exist for delivered orders.",
+    "customers has TWO id columns: customer_id (order-level, 1:1 with orders) and customer_unique_id (person-level, 96,096 distinct). Mixing them causes cardinality errors. Use customer_id to join orders; use customer_unique_id to count unique people.",
+    "order_items can have multiple rows per order (order_item_id = 1, 2, 3, ...). Summing without grouping will create a Cartesian product if you join to other many-to-one tables without GROUP BY. Always GROUP BY order_id before aggregating order-level metrics.",
+    "order_payments can have multiple rows per order (installments and/or mixed payment methods). Summing payment_value across the table is correct; grouping by payment_type then summing will double-count orders with mixed methods.",
+    "reviews (order_reviews_dataset) has a composite key (review_id, order_id). review_id alone is NOT unique. One reviewer can leave the same review on multiple orders.",
+    "Three distinct date fields in orders: order_purchase_timestamp (always present), order_delivered_customer_date (NULL for ~3%; NULL whenever status <> 'delivered'), order_estimated_delivery_date (always present). Use the right one for your analysis."
+  ],
+  "unanswerable_question_hints": [
+    "Time coverage is 2016-09-04 through 2018-10-17. Questions about Q1/Q2/Q3 2016 or post-October 2018 are unanswerable.",
+    "No cost of goods sold (COGS), marketing spend, salaries, or overhead. Profit, margin, CAC, LTV, ROI, break-even, and unit economics are unanswerable.",
+    "No returns or refunds data. Return rates, returned revenue, refund volume, and return reasons are unanswerable.",
+    "No inventory data. Stock levels, stockouts, backorders, and carrying cost are unanswerable.",
+    "Geolocation table (olist_geolocation_dataset) is NOT present by design. Distance calculations, maps, city/state geometry, and any lat/long reasoning are unanswerable. Only string city/state fields are available (customer_city, customer_state, seller_city, seller_state).",
+    "No order-modification data. Questions about cancellations by reason, refund amounts, returns by defect, or customer service interactions beyond seller responses to reviews are unanswerable."
+  ]
+}
