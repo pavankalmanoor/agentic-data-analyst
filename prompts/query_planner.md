@@ -41,11 +41,31 @@ cross-validation.
    be answerable by ONE SQL query (joins fine, nested CTEs fine, but
    not "run query A then feed into query B"). Prefer 1–4 sub-questions
    in total. More than 5 usually means you are overdecomposing.
-7. **Reconciliation step:** if two or more sub-questions compute the
-   same business number via different paths (intentional cross-check,
-   or because the user asked for a comparison), set
-   `reconciliation_step` to describe what should match and what delta
-   is acceptable.
+7. **Reconciliation step is gated by the sub-question flags.**
+   Populate `reconciliation_step` if and only if at least TWO
+   sub-questions have `cross_validation_candidate: true` AND share the
+   same `canonical_metric` — i.e. they compute the same business scalar
+   via different valid definitions in the dictionary. In every other
+   case, set `reconciliation_step: null`.
+
+   Specifically, these are NOT reconcilable and MUST have
+   `reconciliation_step: null`:
+   - Complementary views of the same population — different groupings,
+     different bucketings, different slicings. "Relationship between X
+     and Y", "how does X vary with Y", "distribution of X by Y" are
+     all complementary-view questions, not cross-validation.
+   - A single sub-question answering the whole thing (nothing to
+     reconcile against).
+   - Sub-questions whose expected results have different row shapes
+     (e.g. one returns 5 buckets, another returns 2). Different shapes
+     are a reliable tell that you have complementary views, not
+     cross-validation.
+
+   If the user's wording suggests a comparison ("does it differ…",
+   "reconcile across…", "is the X revenue the same under Y and Z"),
+   that is reconciliation. If the wording is "how does X relate to
+   Y" or "what is the distribution of X by Y", that is complementary
+   and reconciliation must be null.
 8. **Output only the JSON.** No preamble, no postamble, no Markdown.
 
 ## Output format (strict JSON)
@@ -186,7 +206,43 @@ performance among sellers with at least 100 delivered orders?"
 `on_time_delivery_rate` has only one definition in the dictionary. One
 SQL path; nothing to reconcile against.)
 
-### Example 4 — unanswerable
+### Example 4 — relationship question, complementary views, no reconciliation
+
+**User question:** "What is the relationship between delivery delay
+and review score?"
+
+**Output:**
+
+```json
+{
+  "restated_question": "Examine how customer review scores vary with delivery performance — whether late-delivered orders receive lower review scores than on-time or early ones, and by how much.",
+  "answerable": true,
+  "unanswerable_reason": null,
+  "sub_questions": [
+    {
+      "id": 1,
+      "question": "For each delivered order with a non-null delivery date and non-null review score, compute delivery_delta_days = order_delivered_customer_date - order_estimated_delivery_date, bucket into delay bands ('<= -7d', '-7 to 0d', '0d', '1-7d', '> 7d'), and report avg review score and order count per bucket.",
+      "canonical_metric": null,
+      "tables_likely": ["olist_orders_dataset", "olist_order_reviews_dataset"],
+      "filters_implied": ["order_status = 'delivered'", "order_delivered_customer_date IS NOT NULL", "review_score IS NOT NULL"],
+      "aggregation_heavy": true,
+      "cross_validation_candidate": false
+    }
+  ],
+  "reconciliation_step": null
+}
+```
+
+(Note: a "relationship" question like this is answered by ONE well-
+designed grouping query. Do NOT add a second sub-question that slices
+the same population differently (e.g., "on-time vs late averages") and
+then claim the two should reconcile — different groupings of the same
+population are complementary views, not cross-validation, and their
+row shapes won't match. `reconciliation_step` is null. If the user
+wants the two-way slice as well, prefer richer bucketing in one query
+over two sub-questions.)
+
+### Example 5 — unanswerable
 
 **User question:** "What was our profit margin in Q1 2018 by category?"
 
@@ -214,6 +270,9 @@ SQL path; nothing to reconcile against.)
 5. For each sub-question: fill in `canonical_metric`, `tables_likely`,
    `filters_implied`, `aggregation_heavy`, and
    `cross_validation_candidate` per the rules above.
-6. If two sub-questions compute the same business number via different
-   paths, populate `reconciliation_step`.
+6. Populate `reconciliation_step` only if at least two sub-questions
+   have `cross_validation_candidate: true` AND share the same
+   `canonical_metric` — otherwise leave it null. Complementary views
+   of a population (different buckets, different slicings) are NOT
+   reconcilable; set `reconciliation_step: null`.
 7. Output only the JSON.
