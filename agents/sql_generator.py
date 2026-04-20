@@ -65,7 +65,7 @@ PRICE_CACHE_READ_PER_MTOK = 0.30
 PRICE_OUTPUT_PER_MTOK = 15.00
 
 # Notes discipline — enforced server-side
-NOTES_MAX_WORDS = 25
+NOTES_MAX_WORDS = 40
 NOTES_BANNED_RE = re.compile(
     r"\b(i think|i believe|confidence|probably|maybe|might be|i'm not sure)\b",
     re.IGNORECASE,

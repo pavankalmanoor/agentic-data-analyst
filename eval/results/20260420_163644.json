@@ -1,0 +1,2145 @@
+{
+  "meta": {
+    "started_at": "2026-04-20T16:36:44.836619+00:00",
+    "finished_at": "2026-04-20T16:42:17.011970+00:00",
+    "wall_time_s": 332.18,
+    "n_trials": 1,
+    "n_questions": 15,
+    "question_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "questions_path": "eval/questions.jsonl",
+    "max_retries": 2,
+    "git_sha": "ae81e89b1d5b49bbc1fa571895f39258aa9dc015",
+    "schema_version": 1
+  },
+  "questions": [
+    {
+      "id": 1,
+      "category": "straightforward",
+      "question": "What was Q3 2017 revenue?",
+      "expected_confidence": [
+        "HIGH"
+      ],
+      "expected_scrutiny_trigger": "cross_validation",
+      "expected_answer_hint": "1.9",
+      "notes": "North-star. Baseline sanity + reconciliation. Items+freight vs payments should agree within ~1%.",
+      "trials": [
+        {
+          "plan": {
+            "answerable": true,
+            "unanswerable_reason": null,
+            "n_sub_questions": 2,
+            "reconciliation_step": true,
+            "full": {
+              "restated_question": "Total revenue for Q3 2017 (July 1 \u2013 September 30, 2017), using available revenue definitions.",
+              "answerable": true,
+              "unanswerable_reason": null,
+              "sub_questions": [
+                {
+                  "id": 1,
+                  "question": "What is the total revenue in Q3 2017 (July 1 \u2013 September 30, 2017) computed as SUM(price) + SUM(freight_value) from order items, excluding canceled and unavailable orders?",
+                  "canonical_metric": "revenue",
+                  "tables_likely": [
+                    "olist_orders_dataset",
+                    "olist_order_items_dataset"
+                  ],
+                  "filters_implied": [
+                    "order_purchase_timestamp BETWEEN '2017-07-01' AND '2017-09-30'",
+                    "order_status NOT IN ('canceled', 'unavailable')"
+                  ],
+                  "aggregation_heavy": true,
+                  "cross_validation_candidate": true
+                },
+                {
+                  "id": 2,
+                  "question": "What is the total revenue in Q3 2017 (July 1 \u2013 September 30, 2017) computed as SUM(payment_value) from order payments, excluding canceled and unavailable orders and excluding payment_type = 'not_defined'?",
+                  "canonical_metric": "revenue",
+                  "tables_likely": [
+                    "olist_orders_dataset",
+                    "olist_order_payments_dataset"
+                  ],
+                  "filters_implied": [
+                    "order_purchase_timestamp BETWEEN '2017-07-01' AND '2017-09-30'",
+                    "order_status NOT IN ('canceled', 'unavailable')",
+                    "payment_type <> 'not_defined'"
+                  ],
+                  "aggregation_heavy": true,
+                  "cross_validation_candidate": true
+                }
+              ],
+              "reconciliation_step": "Results from sub-question 1 (items + freight) and sub-question 2 (payments) should agree within ~0.02\u20130.5%. A delta larger than 0.5% indicates a SQL error or data anomaly worth investigating."
+            }
+          },
+          "sub_questions": [
+            {
+              "sub_question_id": 1,
+              "question": "What is the total revenue in Q3 2017 (July 1 \u2013 September 30, 2017) computed as SUM(price) + SUM(freight_value) from order items, excluding canceled and unavailable orders?",
+              "canonical_metric": "revenue",
+              "sql": "SELECT SUM(oi.price) + SUM(oi.freight_value) AS total_revenue FROM olist_order_items_dataset AS oi JOIN olist_orders_dataset AS o ON o.order_id = oi.order_id WHERE o.order_purchase_timestamp >= CAST('2017-07-01' AS DATE) AND o.order_purchase_timestamp < CAST('2017-10-01' AS DATE) AND NOT o.order_status IN ('canceled', 'unavailable')",
+              "notes": "Used revenue_from_items_and_freight definition; excluded canceled/unavailable orders; Q3 2017 bounded by purchase timestamp.",
+              "row_count": 1,
+              "sanity": {
+                "passed": true,
+                "severity": "low",
+                "flags": [],
+                "llm_severity": "low",
+                "llm_verdict": "Single-row Q3 2017 revenue of ~$1.96M is plausible and consistent with Olist's quarterly revenue baseline for that period.",
+                "llm_concerns": []
+              },
+              "retry_count": 0,
+              "retries_exhausted": false
+            },
+            {
+              "sub_question_id": 2,
+              "question": "What is the total revenue in Q3 2017 (July 1 \u2013 September 30, 2017) computed as SUM(payment_value) from order payments, excluding canceled and unavailable orders and excluding payment_type = 'not_defined'?",
+              "canonical_metric": "revenue",
+              "sql": "SELECT SUM(p.payment_value) AS total_revenue FROM olist_orders_dataset AS o JOIN olist_order_payments_dataset AS p ON p.order_id = o.order_id WHERE o.order_purchase_timestamp >= CAST('2017-07-01' AS DATE) AND o.order_purchase_timestamp < CAST('2017-10-01' AS DATE) AND NOT o.order_status IN ('canceled', 'unavailable') AND p.payment_type <> 'not_defined'",
+              "notes": "Used revenue_from_payments definition; excluded canceled/unavailable orders and payment_type='not_defined'; Q3 2017 bounded with < 2017-10-01 for precision.",
+              "row_count": 1,
+              "sanity": {
+                "passed": true,
+                "severity": "low",
+                "flags": [],
+                "llm_severity": "low",
+                "llm_verdict": "Single-row Q3 2017 revenue of ~$1.96M is within the plausible range for one quarter of Olist activity and consistent with the generator's explicit handling of exclusions and date bounds.",
+                "llm_concerns": []
+              },
+              "retry_count": 0,
+              "retries_exhausted": false
+            }
+          ],
+          "reconciliation": {
+            "skipped": false,
+            "passed": true,
+            "severity": "low",
+            "delta_pct": 0.00018672660181997717,
+            "note": "The two definitions agree within 0.02% ($1,957,760 from items+freight vs $1,958,126 from payments), a negligible gap entirely consistent with installment-payment rounding across Q3 2017.",
+            "reason": null,
+            "shape": "scalar",
+            "key_alignment": "n/a",
+            "mean_delta_pct": 0.00018672660181997717,
+            "max_delta_pct": 0.00018672660181997717,
+            "missing_keys_a": [],
+            "missing_keys_b": []
+          },
+          "confidence": {
+            "label": "HIGH",
+            "reason": "Sanity clean on every sub-question and reconciliation passed at severity=low; no retries were required.",
+            "derivation": {
+              "planner_answerable": true,
+              "max_retries": 2,
+              "sub_count": 2,
+              "sanity_severities": [
+                "low",
+                "low"
+              ],
+              "retry_counts": [
+                0,
+                0
+              ],
+              "retries_exhausted_any": false,
+              "recon_skipped": false,
+              "recon_passed": true,
+              "recon_severity": "low"
+            }
+          },
+          "report": {
+            "answer": "Q3 2017 revenue was approximately **$1.96M**, with two independent calculations \u2014 items+freight ($1,957,760) and payments ($1,958,126) \u2014 agreeing within 0.02%.\n\nConfidence: HIGH",
+            "methodology": "I decomposed this into two sub-questions, each computing Q3 2017 revenue using a different canonical definition so the answer could be cross-checked:\n1. **Sub-question 1 (items+freight):** Summed `price` and `freight_value` from `olist_order_items_dataset`, joined to `olist_orders_dataset`, filtered to `order_purchase_timestamp` in July 1 \u2013 September 30, 2017 and excluding canceled/unavailable orders.\n2. **Sub-question 2 (payments):** Summed `payment_value` from `olist_order_payments_dataset`, joined to `olist_orders_dataset`, with the same date and status filters, plus an additional exclusion of `payment_type = 'not_defined'`.\n\nBoth paths produced a scalar result, and the plan called for reconciling them with an expected delta of \u22640.5%.",
+            "verification": "\u2713 Sub-question 1 (items+freight) sanity: clean \u2014 single-row result of $1,957,760 judged plausible and consistent with Olist's quarterly revenue baseline for Q3 2017.\n\u2713 Sub-question 2 (payments) sanity: clean \u2014 single-row result of $1,958,126 within the plausible range, with explicit handling of exclusions and date bounds noted.\n\u2713 Cross-validation: The two definitions agree within 0.02% ($1,957,760 from items+freight vs $1,958,126 from payments), a negligible gap entirely consistent with installment-payment rounding across Q3 2017.\nNo retries were required on either sub-question.",
+            "caveats": "\u26a0 Canceled and unavailable orders are excluded from both definitions.\n\u26a0 The payments definition additionally excludes rows where `payment_type = 'not_defined'`.\n\u26a0 The $365 gap between the two definitions is consistent with installment-payment rounding and does not indicate a data error; however, if extreme precision is required, the items+freight figure ($1,957,760) reflects the transactional line-item total while the payments figure ($1,958,126) reflects what was actually collected (including installment treatment).\n\u26a0 Both definitions use `order_purchase_timestamp` as the date boundary, not delivery or payment dates."
+          },
+          "usage": {
+            "planner": {
+              "input_tokens": 17,
+              "cache_creation_input_tokens": 13303,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 531,
+              "stop_reason": "end_turn"
+            },
+            "sql_generator": [
+              {
+                "input_tokens": 217,
+                "cache_creation_input_tokens": 12994,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 162,
+                "stop_reason": "end_turn"
+              },
+              {
+                "input_tokens": 237,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 12994,
+                "output_tokens": 177,
+                "stop_reason": "end_turn"
+              }
+            ],
+            "sanity": [
+              {
+                "input_tokens": 2582,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 66
+              },
+              {
+                "input_tokens": 2615,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 78
+              }
+            ],
+            "reconciliation": {
+              "input_tokens": 2565,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 69
+            },
+            "presenter": {
+              "input_tokens": 1523,
+              "cache_creation_input_tokens": 3411,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 634,
+              "stop_reason": "end_turn"
+            }
+          },
+          "cost": {
+            "planner": 0.05790225,
+            "sql_generator": 0.0590727,
+            "sanity": 0.005917,
+            "reconciliation": 0.00291,
+            "presenter": 0.026870250000000002,
+            "total": 0.1526722
+          },
+          "ok": true,
+          "error": null,
+          "wall_time_s": 32.858,
+          "trial_idx": 0
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "category": "straightforward",
+      "question": "How many unique customers are in the dataset?",
+      "expected_confidence": [
+        "HIGH",
+        "MEDIUM"
+      ],
+      "expected_scrutiny_trigger": "none",
+      "expected_answer_hint": "96",
+      "notes": "Single-path. COUNT DISTINCT on customer_unique_id. Will land MEDIUM under current skipped-recon policy (#39).",
+      "trials": [
+        {
+          "plan": {
+            "answerable": true,
+            "unanswerable_reason": null,
+            "n_sub_questions": 1,
+            "reconciliation_step": false,
+            "full": {
+              "restated_question": "Count of distinct individual customers (people) who appear in the dataset, using the person-level identifier.",
+              "answerable": true,
+              "unanswerable_reason": null,
+              "sub_questions": [
+                {
+                  "id": 1,
+                  "question": "Count of DISTINCT customer_unique_id across the olist_customers_dataset table.",
+                  "canonical_metric": "unique_customers",
+                  "tables_likely": [
+                    "olist_customers_dataset"
+                  ],
+                  "filters_implied": [],
+                  "aggregation_heavy": false,
+                  "cross_validation_candidate": false
+                }
+              ],
+              "reconciliation_step": null
+            }
+          },
+          "sub_questions": [
+            {
+              "sub_question_id": 1,
+              "question": "Count of DISTINCT customer_unique_id across the olist_customers_dataset table.",
+              "canonical_metric": "unique_customers",
+              "sql": "SELECT COUNT(DISTINCT customer_unique_id) AS unique_customers FROM olist_customers_dataset",
+              "notes": "Used unique_customers_correct definition; counted customer_unique_id (person-level), not customer_id which is order-level.",
+              "row_count": 1,
+              "sanity": {
+                "passed": true,
+                "severity": "low",
+                "flags": [],
+                "llm_severity": "low",
+                "llm_verdict": "Count of 96,096 unique customers from the customers table is consistent with the known Olist dataset cardinality and the generator correctly distinguished customer_unique_id (person-level) from customer_id (order-level).",
+                "llm_concerns": []
+              },
+              "retry_count": 0,
+              "retries_exhausted": false
+            }
+          ],
+          "reconciliation": {
+            "skipped": true,
+            "passed": true,
+            "severity": "low",
+            "delta_pct": null,
+            "note": null,
+            "reason": "Planner emitted no reconciliation_step.",
+            "shape": "skipped",
+            "key_alignment": "n/a",
+            "mean_delta_pct": null,
+            "max_delta_pct": null,
+            "missing_keys_a": [],
+            "missing_keys_b": []
+          },
+          "confidence": {
+            "label": "MEDIUM",
+            "reason": "Reconciliation was not applicable (single-path question); per current policy this is MEDIUM even when sanity is clean, pending a planner annotation to distinguish genuinely-single-path from should-have-been-cross-val.",
+            "derivation": {
+              "planner_answerable": true,
+              "max_retries": 2,
+              "sub_count": 1,
+              "sanity_severities": [
+                "low"
+              ],
+              "retry_counts": [
+                0
+              ],
+              "retries_exhausted_any": false,
+              "recon_skipped": true,
+              "recon_passed": true,
+              "recon_severity": "low"
+            }
+          },
+          "report": {
+            "answer": "There are **96,096** unique individual customers in the dataset.\n\nConfidence: MEDIUM",
+            "methodology": "I used a single sub-question: count distinct person-level customers from the `olist_customers_dataset` table using `COUNT(DISTINCT customer_unique_id)`. The generator explicitly chose `customer_unique_id` (which identifies a person) rather than `customer_id` (which is order-scoped and would overcount individuals who placed more than one order). No additional filters were applied.",
+            "verification": "\u2713 Sub-question 1 sanity: clean \u2014 the count of 96,096 is consistent with the known Olist dataset cardinality, and the correct person-level identifier was used.\nCross-validation was not applicable \u2014 the question has a single canonical definition and the planner emitted no reconciliation step.",
+            "caveats": "\u26a0 Confidence is labeled MEDIUM rather than HIGH because this is a single-path question with no cross-validation; per pipeline policy, single-path questions receive MEDIUM even when the sanity check is clean, pending a planner annotation confirming the question is genuinely single-definition.\n\u26a0 The count reflects `customer_unique_id` entries in `olist_customers_dataset`; customers who exist in no order (if any) would still be counted, while any person-level deduplication upstream of this table is assumed to have already occurred."
+          },
+          "usage": {
+            "planner": {
+              "input_tokens": 16,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 13303,
+              "output_tokens": 175,
+              "stop_reason": "end_turn"
+            },
+            "sql_generator": [
+              {
+                "input_tokens": 121,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 12994,
+                "output_tokens": 75,
+                "stop_reason": "end_turn"
+              }
+            ],
+            "sanity": [
+              {
+                "input_tokens": 2479,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 81
+              }
+            ],
+            "reconciliation": {},
+            "presenter": {
+              "input_tokens": 661,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 3411,
+              "output_tokens": 342,
+              "stop_reason": "end_turn"
+            }
+          },
+          "cost": {
+            "planner": 0.0066639,
+            "sql_generator": 0.0053862,
+            "sanity": 0.002884,
+            "reconciliation": 0.0,
+            "presenter": 0.008136299999999999,
+            "total": 0.023070399999999998
+          },
+          "ok": true,
+          "error": null,
+          "wall_time_s": 14.848,
+          "trial_idx": 0
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "category": "straightforward",
+      "question": "What is the average order value?",
+      "expected_confidence": [
+        "HIGH",
+        "MEDIUM"
+      ],
+      "expected_scrutiny_trigger": "cross_validation",
+      "expected_answer_hint": null,
+      "notes": "Metric-definition ambiguity (items+freight vs payments divided by orders). Good candidate for planner fan-out.",
+      "trials": [
+        {
+          "plan": {
+            "answerable": true,
+            "unanswerable_reason": null,
+            "n_sub_questions": 2,
+            "reconciliation_step": true,
+            "full": {
+              "restated_question": "Compute the average monetary value per order across all orders in the dataset.",
+              "answerable": true,
+              "unanswerable_reason": null,
+              "sub_questions": [
+                {
+                  "id": 1,
+                  "question": "Compute the average order value as SUM(payment_value) / COUNT(DISTINCT order_id) from the payments table, excluding payment_type = 'not_defined' and orders with status 'canceled' or 'unavailable'.",
+                  "canonical_metric": "average_order_value",
+                  "tables_likely": [
+                    "olist_order_payments_dataset",
+                    "olist_orders_dataset"
+                  ],
+                  "filters_implied": [
+                    "payment_type <> 'not_defined'",
+                    "order_status NOT IN ('canceled', 'unavailable')"
+                  ],
+                  "aggregation_heavy": true,
+                  "cross_validation_candidate": true
+                },
+                {
+                  "id": 2,
+                  "question": "Compute the average order value as (SUM(price) + SUM(freight_value)) / COUNT(DISTINCT order_id) from the order items table, joining to orders to exclude canceled and unavailable orders.",
+                  "canonical_metric": "average_order_value",
+                  "tables_likely": [
+                    "olist_order_items_dataset",
+                    "olist_orders_dataset"
+                  ],
+                  "filters_implied": [
+                    "order_status NOT IN ('canceled', 'unavailable')"
+                  ],
+                  "aggregation_heavy": true,
+                  "cross_validation_candidate": true
+                }
+              ],
+              "reconciliation_step": "The AOV from sub-question 1 (payment-based) and sub-question 2 (items + freight-based) should agree within ~0.02%. A larger delta indicates a SQL error or unexpected data anomaly."
+            }
+          },
+          "sub_questions": [
+            {
+              "sub_question_id": 1,
+              "question": "Compute the average order value as SUM(payment_value) / COUNT(DISTINCT order_id) from the payments table, excluding payment_type = 'not_defined' and orders with status 'canceled' or 'unavailable'.",
+              "canonical_metric": "average_order_value",
+              "sql": "SELECT SUM(p.payment_value) / COUNT(DISTINCT p.order_id) AS average_order_value FROM olist_order_payments_dataset AS p JOIN olist_orders_dataset AS o ON o.order_id = p.order_id WHERE p.payment_type <> 'not_defined' AND NOT o.order_status IN ('canceled', 'unavailable')",
+              "notes": "Used aov_from_payments definition; excluded payment_type='not_defined' and canceled/unavailable orders via join to orders table.",
+              "row_count": 1,
+              "sanity": {
+                "passed": true,
+                "severity": "low",
+                "flags": [],
+                "llm_severity": "low",
+                "llm_verdict": "Single-row average order value of $160.27 is plausible for the Olist dataset after filtering out non-defined payment types and canceled/unavailable orders.",
+                "llm_concerns": []
+              },
+              "retry_count": 0,
+              "retries_exhausted": false
+            },
+            {
+              "sub_question_id": 2,
+              "question": "Compute the average order value as (SUM(price) + SUM(freight_value)) / COUNT(DISTINCT order_id) from the order items table, joining to orders to exclude canceled and unavailable orders.",
+              "canonical_metric": "average_order_value",
+              "sql": "SELECT (SUM(oi.price) + SUM(oi.freight_value)) / COUNT(DISTINCT oi.order_id) AS avg_order_value FROM olist_order_items_dataset AS oi JOIN olist_orders_dataset AS o ON o.order_id = oi.order_id WHERE NOT o.order_status IN ('canceled', 'unavailable')",
+              "notes": "Used aov_from_items definition; excluded canceled and unavailable orders via join to olist_orders_dataset.",
+              "row_count": 1,
+              "sanity": {
+                "passed": true,
+                "severity": "low",
+                "flags": [],
+                "llm_severity": "low",
+                "llm_verdict": "Single-row aggregate of ~$160.24 average order value is plausible for Olist's e-commerce orders over the dataset period, and the calculation method (sum of item prices and freight divided by distinct order count) matches the sub-question specification.",
+                "llm_concerns": []
+              },
+              "retry_count": 0,
+              "retries_exhausted": false
+            }
+          ],
+          "reconciliation": {
+            "skipped": false,
+            "passed": true,
+            "severity": "low",
+            "delta_pct": 0.0001581083007390565,
+            "note": "The two AOV definitions agree within 0.016% ($160.27 from payments vs $160.24 from items+freight), a negligible difference well within the expected rounding tolerance for freight and installment-payment splits across the full order population.",
+            "reason": null,
+            "shape": "scalar",
+            "key_alignment": "n/a",
+            "mean_delta_pct": 0.0001581083007390565,
+            "max_delta_pct": 0.0001581083007390565,
+            "missing_keys_a": [],
+            "missing_keys_b": []
+          },
+          "confidence": {
+            "label": "HIGH",
+            "reason": "Sanity clean on every sub-question and reconciliation passed at severity=low; no retries were required.",
+            "derivation": {
+              "planner_answerable": true,
+              "max_retries": 2,
+              "sub_count": 2,
+              "sanity_severities": [
+                "low",
+                "low"
+              ],
+              "retry_counts": [
+                0,
+                0
+              ],
+              "retries_exhausted_any": false,
+              "recon_skipped": false,
+              "recon_passed": true,
+              "recon_severity": "low"
+            }
+          },
+          "report": {
+            "answer": "The average order value across the dataset is approximately **$160.27**, with two independent calculation paths agreeing within 0.016%.\n\nConfidence: HIGH",
+            "methodology": "I decomposed this into two sub-questions, each computing AOV via a different canonical definition to allow cross-validation:\n1. **Payments-based AOV** (sub-question 1): `SUM(payment_value) / COUNT(DISTINCT order_id)` from the payments table, excluding `payment_type = 'not_defined'` and orders with status `canceled` or `unavailable`.\n2. **Items + freight-based AOV** (sub-question 2): `(SUM(price) + SUM(freight_value)) / COUNT(DISTINCT order_id)` from the order items table, excluding `canceled` and `unavailable` orders via a join to the orders table.\n\nBoth queries operate over the full dataset population and share the same order-status exclusions, so the two results are directly comparable.",
+            "verification": "\u2713 Sub-question 1 (payments-based): sanity clean \u2014 single-row result of $160.27 deemed plausible for the Olist dataset after filtering non-defined payment types and canceled/unavailable orders; no flags raised.\n\u2713 Sub-question 2 (items+freight-based): sanity clean \u2014 single-row result of $160.24 deemed plausible; calculation method matches specification; no flags raised.\n\u2713 Cross-validation: The two AOV definitions agree within 0.016% ($160.27 from payments vs $160.24 from items+freight), a negligible difference well within the expected rounding tolerance for freight and installment-payment splits across the full order population.\nNo retries were required on either sub-question.",
+            "caveats": "\u26a0 Canceled and unavailable orders are excluded from both definitions.\n\u26a0 The payments-based path additionally excludes rows where `payment_type = 'not_defined'`; the items+freight path does not apply this filter (it has no equivalent column), which accounts for the small residual delta of $0.03.\n\u26a0 The payments definition counts installment payment values in full at the order level, not spread across installment dates."
+          },
+          "usage": {
+            "planner": {
+              "input_tokens": 14,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 13303,
+              "output_tokens": 441,
+              "stop_reason": "end_turn"
+            },
+            "sql_generator": [
+              {
+                "input_tokens": 205,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 12994,
+                "output_tokens": 141,
+                "stop_reason": "end_turn"
+              },
+              {
+                "input_tokens": 183,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 12994,
+                "output_tokens": 136,
+                "stop_reason": "end_turn"
+              }
+            ],
+            "sanity": [
+              {
+                "input_tokens": 2584,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 68
+              },
+              {
+                "input_tokens": 2557,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 87
+              }
+            ],
+            "reconciliation": {
+              "input_tokens": 2539,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 72
+            },
+            "presenter": {
+              "input_tokens": 1394,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 3411,
+              "output_tokens": 542,
+              "stop_reason": "end_turn"
+            }
+          },
+          "cost": {
+            "planner": 0.0106479,
+            "sql_generator": 0.013115400000000001,
+            "sanity": 0.005915999999999999,
+            "reconciliation": 0.002899,
+            "presenter": 0.013335299999999998,
+            "total": 0.0459136
+          },
+          "ok": true,
+          "error": null,
+          "wall_time_s": 28.059,
+          "trial_idx": 0
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "category": "straightforward",
+      "question": "How many orders were placed in 2017?",
+      "expected_confidence": [
+        "HIGH",
+        "MEDIUM"
+      ],
+      "expected_scrutiny_trigger": "none",
+      "expected_answer_hint": null,
+      "notes": "Time filter correctness. Watch for canceled/unavailable status handling.",
+      "trials": [
+        {
+          "plan": {
+            "answerable": true,
+            "unanswerable_reason": null,
+            "n_sub_questions": 1,
+            "reconciliation_step": false,
+            "full": {
+              "restated_question": "Count of orders placed during calendar year 2017 (January 1 through December 31, 2017).",
+              "answerable": true,
+              "unanswerable_reason": null,
+              "sub_questions": [
+                {
+                  "id": 1,
+                  "question": "Count the number of distinct order_ids in olist_orders_dataset where order_purchase_timestamp falls within 2017 (2017-01-01 to 2017-12-31).",
+                  "canonical_metric": null,
+                  "tables_likely": [
+                    "olist_orders_dataset"
+                  ],
+                  "filters_implied": [
+                    "order_purchase_timestamp >= '2017-01-01' AND order_purchase_timestamp < '2018-01-01'"
+                  ],
+                  "aggregation_heavy": false,
+                  "cross_validation_candidate": false
+                }
+              ],
+              "reconciliation_step": null
+            }
+          },
+          "sub_questions": [
+            {
+              "sub_question_id": 1,
+              "question": "Count the number of distinct order_ids in olist_orders_dataset where order_purchase_timestamp falls within 2017 (2017-01-01 to 2017-12-31).",
+              "canonical_metric": null,
+              "sql": "SELECT COUNT(DISTINCT order_id) AS distinct_orders_2017 FROM olist_orders_dataset WHERE order_purchase_timestamp >= CAST('2017-01-01' AS DATE) AND order_purchase_timestamp < CAST('2018-01-01' AS DATE)",
+              "notes": "Simple distinct count of order_ids filtered to 2017 purchase timestamps; no status filter applied per sub-question.",
+              "row_count": 1,
+              "sanity": {
+                "passed": true,
+                "severity": "low",
+                "flags": [],
+                "llm_severity": "low",
+                "llm_verdict": "A single-row count of 45,101 distinct 2017 orders is plausible against the ~99K total orders in the dataset and aligns with expected Olist activity for a full calendar year.",
+                "llm_concerns": []
+              },
+              "retry_count": 0,
+              "retries_exhausted": false
+            }
+          ],
+          "reconciliation": {
+            "skipped": true,
+            "passed": true,
+            "severity": "low",
+            "delta_pct": null,
+            "note": null,
+            "reason": "Planner emitted no reconciliation_step.",
+            "shape": "skipped",
+            "key_alignment": "n/a",
+            "mean_delta_pct": null,
+            "max_delta_pct": null,
+            "missing_keys_a": [],
+            "missing_keys_b": []
+          },
+          "confidence": {
+            "label": "MEDIUM",
+            "reason": "Reconciliation was not applicable (single-path question); per current policy this is MEDIUM even when sanity is clean, pending a planner annotation to distinguish genuinely-single-path from should-have-been-cross-val.",
+            "derivation": {
+              "planner_answerable": true,
+              "max_retries": 2,
+              "sub_count": 1,
+              "sanity_severities": [
+                "low"
+              ],
+              "retry_counts": [
+                0
+              ],
+              "retries_exhausted_any": false,
+              "recon_skipped": true,
+              "recon_passed": true,
+              "recon_severity": "low"
+            }
+          },
+          "report": {
+            "answer": "**45,101 orders** were placed in 2017 (January 1 through December 31, 2017).\n\nConfidence: MEDIUM",
+            "methodology": "I used a single sub-question: count distinct `order_id` values in `olist_orders_dataset` where `order_purchase_timestamp` falls within the 2017 calendar year (\u2265 2017-01-01 and < 2018-01-01). No order-status filter was applied \u2014 all statuses are included in the count.",
+            "verification": "\u2713 Sub-question 1 sanity: clean \u2014 the result of 45,101 distinct orders is plausible against the ~99K total orders in the dataset and consistent with expected Olist activity for a full calendar year. No flags raised, no retries needed.\nCross-validation was not applicable \u2014 the planner emitted no reconciliation step, and the question has a single canonical definition.",
+            "caveats": "\u26a0 Confidence is MEDIUM rather than HIGH because this is a single-path result with no cross-validation; the pipeline cannot confirm the figure via an independent measurement path.\n\u26a0 No order-status filter was applied, so canceled, unavailable, and all other statuses are included in the 45,101 count.\n\u26a0 The filter is on `order_purchase_timestamp`, so orders purchased in 2017 but delivered or invoiced in a later year are counted here, while orders placed before 2017 are not."
+          },
+          "usage": {
+            "planner": {
+              "input_tokens": 17,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 13303,
+              "output_tokens": 233,
+              "stop_reason": "end_turn"
+            },
+            "sql_generator": [
+              {
+                "input_tokens": 179,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 12994,
+                "output_tokens": 105,
+                "stop_reason": "end_turn"
+              }
+            ],
+            "sanity": [
+              {
+                "input_tokens": 2542,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 77
+              }
+            ],
+            "reconciliation": {},
+            "presenter": {
+              "input_tokens": 764,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 3411,
+              "output_tokens": 366,
+              "stop_reason": "end_turn"
+            }
+          },
+          "cost": {
+            "planner": 0.0075369,
+            "sql_generator": 0.0060102,
+            "sanity": 0.002927,
+            "reconciliation": 0.0,
+            "presenter": 0.0088053,
+            "total": 0.0252794
+          },
+          "ok": true,
+          "error": null,
+          "wall_time_s": 14.733,
+          "trial_idx": 0
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "category": "straightforward",
+      "question": "What percentage of orders were delivered on time?",
+      "expected_confidence": [
+        "HIGH",
+        "MEDIUM"
+      ],
+      "expected_scrutiny_trigger": "none",
+      "expected_answer_hint": null,
+      "notes": "Date comparison (delivered_customer_date vs estimated_delivery_date) + status filtering to delivered orders only.",
+      "trials": [
+        {
+          "plan": {
+            "answerable": true,
+            "unanswerable_reason": null,
+            "n_sub_questions": 1,
+            "reconciliation_step": false,
+            "full": {
+              "restated_question": "What fraction (as a percentage) of delivered orders arrived on or before the estimated delivery date?",
+              "answerable": true,
+              "unanswerable_reason": null,
+              "sub_questions": [
+                {
+                  "id": 1,
+                  "question": "For all delivered orders with a non-null order_delivered_customer_date, compute the percentage where order_delivered_customer_date <= order_estimated_delivery_date.",
+                  "canonical_metric": "on_time_delivery_rate",
+                  "tables_likely": [
+                    "olist_orders_dataset"
+                  ],
+                  "filters_implied": [
+                    "order_status = 'delivered'",
+                    "order_delivered_customer_date IS NOT NULL"
+                  ],
+                  "aggregation_heavy": true,
+                  "cross_validation_candidate": false
+                }
+              ],
+              "reconciliation_step": null
+            }
+          },
+          "sub_questions": [
+            {
+              "sub_question_id": 1,
+              "question": "For all delivered orders with a non-null order_delivered_customer_date, compute the percentage where order_delivered_customer_date <= order_estimated_delivery_date.",
+              "canonical_metric": "on_time_delivery_rate",
+              "sql": "SELECT COUNT(*) FILTER(WHERE order_delivered_customer_date <= order_estimated_delivery_date) * 100.0 / COUNT(*) AS on_time_delivery_rate_pct FROM olist_orders_dataset WHERE order_status = 'delivered' AND NOT order_delivered_customer_date IS NULL",
+              "notes": "Used on_time_delivery_rate canonical definition with FILTER-based count ratio; restricted to delivered orders with non-null delivery date.",
+              "row_count": 1,
+              "sanity": {
+                "passed": false,
+                "severity": "high",
+                "flags": [
+                  {
+                    "rule": "rate_out_of_range",
+                    "column": "on_time_delivery_rate_pct",
+                    "message": "on_time_delivery_rate_pct outside [0,1]: min=91.888 max=91.888.",
+                    "severity": "high"
+                  }
+                ],
+                "llm_severity": null,
+                "llm_verdict": null,
+                "llm_concerns": []
+              },
+              "retry_count": 2,
+              "retries_exhausted": true
+            }
+          ],
+          "reconciliation": {
+            "skipped": true,
+            "passed": true,
+            "severity": "low",
+            "delta_pct": null,
+            "note": null,
+            "reason": "Planner emitted no reconciliation_step.",
+            "shape": "skipped",
+            "key_alignment": "n/a",
+            "mean_delta_pct": null,
+            "max_delta_pct": null,
+            "missing_keys_a": [],
+            "missing_keys_b": []
+          },
+          "confidence": {
+            "label": "UNABLE",
+            "reason": "Sub-question(s) [1] exhausted the retry budget (2) with sanity still failing; declining rather than returning an unreliable number.",
+            "derivation": {
+              "planner_answerable": true,
+              "max_retries": 2,
+              "sub_count": 1,
+              "sanity_severities": [
+                "high"
+              ],
+              "retry_counts": [
+                2
+              ],
+              "retries_exhausted_any": true,
+              "recon_skipped": true,
+              "recon_passed": true,
+              "recon_severity": "low"
+            }
+          },
+          "report": {
+            "answer": "I can't answer this reliably. Sub-question 1 exhausted its retry budget (2 attempts) with sanity checks still failing, so the pipeline declined rather than return an unreliable number.\n\nConfidence: UNABLE",
+            "methodology": "I used a single sub-question: compute the percentage of delivered orders (with a non-null `order_delivered_customer_date`) where the actual delivery date was on or before the estimated delivery date. The SQL used a `FILTER`-based count ratio against the `olist_orders_dataset` table, restricted to `order_status = 'delivered'` and non-null delivery dates. After two retry attempts, the sanity check continued to flag the result.",
+            "verification": "\u26a0 Sub-question 1 sanity: failed with high severity across all attempts (retry_count=2). The sanity rule `rate_out_of_range` flagged `on_time_delivery_rate_pct` because the value (~91.89) falls outside the expected [0, 1] range \u2014 the SQL correctly computed a percentage (multiplied by 100), but the sanity layer expected a rate expressed as a decimal between 0 and 1. The pipeline was unable to resolve this discrepancy within the retry budget and declined rather than surface a potentially unreliable number.\nCross-validation was not applicable \u2014 the question has a single definitional path and no reconciliation step was planned.",
+            "caveats": "\u26a0 The pipeline declined due to retry exhaustion on a sanity check; the underlying value (~91.89%) may in fact be a correctly computed percentage, but the automated checks could not confirm it within the allowed attempts.\n\u26a0 Only orders with `order_status = 'delivered'` and a non-null `order_delivered_customer_date` are included; orders still in transit, canceled, or missing a delivery timestamp are excluded by definition."
+          },
+          "usage": {
+            "planner": {
+              "input_tokens": 16,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 13303,
+              "output_tokens": 225,
+              "stop_reason": "end_turn"
+            },
+            "sql_generator": [
+              {
+                "input_tokens": 172,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 12994,
+                "output_tokens": 126,
+                "stop_reason": "end_turn"
+              },
+              {
+                "input_tokens": 345,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 12994,
+                "output_tokens": 143,
+                "stop_reason": "end_turn"
+              },
+              {
+                "input_tokens": 356,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 12994,
+                "output_tokens": 125,
+                "stop_reason": "end_turn"
+              }
+            ],
+            "sanity": [
+              {},
+              {},
+              {}
+            ],
+            "reconciliation": {},
+            "presenter": {
+              "input_tokens": 808,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 3411,
+              "output_tokens": 449,
+              "stop_reason": "end_turn"
+            }
+          },
+          "cost": {
+            "planner": 0.007413900000000001,
+            "sql_generator": 0.0202236,
+            "sanity": 0.0,
+            "reconciliation": 0.0,
+            "presenter": 0.0101823,
+            "total": 0.0378198
+          },
+          "ok": true,
+          "error": null,
+          "wall_time_s": 23.969,
+          "trial_idx": 0
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "category": "straightforward",
+      "question": "What is the distribution of review scores?",
+      "expected_confidence": [
+        "HIGH",
+        "MEDIUM"
+      ],
+      "expected_scrutiny_trigger": "none",
+      "expected_answer_hint": null,
+      "notes": "Simple GROUP BY review_score. Tests the multi-row presentation path.",
+      "trials": [
+        {
+          "plan": {
+            "answerable": true,
+            "unanswerable_reason": null,
+            "n_sub_questions": 1,
+            "reconciliation_step": false,
+            "full": {
+              "restated_question": "For each star rating (1 through 5), how many reviews received that score, and what percentage of total reviews does each represent?",
+              "answerable": true,
+              "unanswerable_reason": null,
+              "sub_questions": [
+                {
+                  "id": 1,
+                  "question": "Count the number of reviews and percentage of total reviews for each review_score value (1\u20135), grouped by review_score.",
+                  "canonical_metric": null,
+                  "tables_likely": [
+                    "olist_order_reviews_dataset"
+                  ],
+                  "filters_implied": [],
+                  "aggregation_heavy": false,
+                  "cross_validation_candidate": false
+                }
+              ],
+              "reconciliation_step": null
+            }
+          },
+          "sub_questions": [
+            {
+              "sub_question_id": 1,
+              "question": "Count the number of reviews and percentage of total reviews for each review_score value (1\u20135), grouped by review_score.",
+              "canonical_metric": null,
+              "sql": "SELECT review_score, COUNT(*) AS review_count, ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) AS pct_of_total FROM olist_order_reviews_dataset GROUP BY review_score ORDER BY review_score",
+              "notes": "Counted reviews per score and computed percentage using a window function over total; composite key (review_id, order_id) means COUNT(*) is correct here.",
+              "row_count": 5,
+              "sanity": {
+                "passed": true,
+                "severity": "low",
+                "flags": [],
+                "llm_severity": "low",
+                "llm_verdict": "Five-row result with review scores 1\u20135, counts ranging from 3,151 to 57,328, and percentages summing to 100% matches the expected shape and aligns with Olist's strong skew toward 5-star reviews (~58% reported in priors).",
+                "llm_concerns": []
+              },
+              "retry_count": 0,
+              "retries_exhausted": false
+            }
+          ],
+          "reconciliation": {
+            "skipped": true,
+            "passed": true,
+            "severity": "low",
+            "delta_pct": null,
+            "note": null,
+            "reason": "Planner emitted no reconciliation_step.",
+            "shape": "skipped",
+            "key_alignment": "n/a",
+            "mean_delta_pct": null,
+            "max_delta_pct": null,
+            "missing_keys_a": [],
+            "missing_keys_b": []
+          },
+          "confidence": {
+            "label": "MEDIUM",
+            "reason": "Reconciliation was not applicable (single-path question); per current policy this is MEDIUM even when sanity is clean, pending a planner annotation to distinguish genuinely-single-path from should-have-been-cross-val.",
+            "derivation": {
+              "planner_answerable": true,
+              "max_retries": 2,
+              "sub_count": 1,
+              "sanity_severities": [
+                "low"
+              ],
+              "retry_counts": [
+                0
+              ],
+              "retries_exhausted_any": false,
+              "recon_skipped": true,
+              "recon_passed": true,
+              "recon_severity": "low"
+            }
+          },
+          "report": {
+            "answer": "The distribution of review scores across all 99,224 reviews is heavily skewed toward 5 stars:\n\n| Score | Count | % of Total |\n|-------|-------|------------|\n| \u2b50 1 | 11,424 | 11.51% |\n| \u2b50 2 | 3,151 | 3.18% |\n| \u2b50 3 | 8,179 | 8.24% |\n| \u2b50 4 | 19,142 | 19.29% |\n| \u2b50 5 | 57,328 | 57.78% |\n\nMore than half of all reviews (57.78%) are 5-star ratings. The 2-star score is notably the least common at just 3.18%, and 1-star reviews (11.51%) outnumber both 2-star and 3-star reviews.\n\nConfidence: MEDIUM",
+            "methodology": "I used a single sub-question: group all rows in `olist_order_reviews_dataset` by `review_score`, count the reviews per score, and compute each score's share of the total using a window function (`SUM(COUNT(*)) OVER ()`). The result covers all five possible star ratings (1\u20135) with no filters applied. The generator noted that `COUNT(*)` is appropriate here because the table uses a composite key of `review_id` and `order_id`.",
+            "verification": "\u2713 Sub-question 1 sanity: clean \u2014 5 rows returned covering scores 1\u20135, counts ranging from 3,151 to 57,328, and percentages summing to 100%. The sanity check confirmed that the ~58% share for 5-star reviews aligns with known Olist priors. No flags raised, no retry required.\nCross-validation was not applicable \u2014 the planner emitted no reconciliation step, so only a single query path was used.",
+            "caveats": "\u26a0 Confidence is MEDIUM rather than HIGH because this is a single-path query with no cross-validation; the result is internally consistent and sanity-clean, but has not been independently verified against an alternative metric definition.\n\u26a0 No filters were applied \u2014 all reviews in the dataset are included regardless of order status or date range. If a specific time window or order subset is needed, the query would need to be scoped accordingly."
+          },
+          "usage": {
+            "planner": {
+              "input_tokens": 15,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 13303,
+              "output_tokens": 190,
+              "stop_reason": "end_turn"
+            },
+            "sql_generator": [
+              {
+                "input_tokens": 130,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 12994,
+                "output_tokens": 122,
+                "stop_reason": "end_turn"
+              }
+            ],
+            "sanity": [
+              {
+                "input_tokens": 2838,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 96
+              }
+            ],
+            "reconciliation": {},
+            "presenter": {
+              "input_tokens": 1214,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 3411,
+              "output_tokens": 591,
+              "stop_reason": "end_turn"
+            }
+          },
+          "cost": {
+            "planner": 0.0068859,
+            "sql_generator": 0.0061182,
+            "sanity": 0.0033179999999999998,
+            "reconciliation": 0.0,
+            "presenter": 0.013530300000000002,
+            "total": 0.0298524
+          },
+          "ok": true,
+          "error": null,
+          "wall_time_s": 19.458,
+          "trial_idx": 0
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "category": "tricky",
+      "question": "Which sellers have the worst on-time delivery performance among sellers with at least 100 orders?",
+      "expected_confidence": [
+        "HIGH",
+        "MEDIUM"
+      ],
+      "expected_scrutiny_trigger": "none",
+      "expected_answer_hint": null,
+      "notes": "Seller-orders-items join + HAVING filter. 'At least 100 orders' is ambiguous (delivered orders vs all orders) \u2014 watch for drift.",
+      "trials": [
+        {
+          "plan": {
+            "answerable": true,
+            "unanswerable_reason": null,
+            "n_sub_questions": 1,
+            "reconciliation_step": false,
+            "full": {
+              "restated_question": "Among sellers who have at least 100 delivered orders, identify the bottom performers ranked by on-time delivery rate (fraction of delivered orders arriving on or before the estimated delivery date).",
+              "answerable": true,
+              "unanswerable_reason": null,
+              "sub_questions": [
+                {
+                  "id": 1,
+                  "question": "For each seller, compute the on-time delivery rate (fraction of delivered orders where order_delivered_customer_date <= order_estimated_delivery_date), restricted to sellers with at least 100 delivered orders; return the bottom 10 by that rate, including their seller_id, delivered order count, and on-time rate.",
+                  "canonical_metric": "on_time_delivery_rate",
+                  "tables_likely": [
+                    "olist_orders_dataset",
+                    "olist_order_items_dataset",
+                    "olist_sellers_dataset"
+                  ],
+                  "filters_implied": [
+                    "order_status = 'delivered'",
+                    "order_delivered_customer_date IS NOT NULL",
+                    "HAVING COUNT(DISTINCT olist_orders_dataset.order_id) >= 100"
+                  ],
+                  "aggregation_heavy": true,
+                  "cross_validation_candidate": false
+                }
+              ],
+              "reconciliation_step": null
+            }
+          },
+          "sub_questions": [
+            {
+              "sub_question_id": 1,
+              "question": "For each seller, compute the on-time delivery rate (fraction of delivered orders where order_delivered_customer_date <= order_estimated_delivery_date), restricted to sellers with at least 100 delivered orders; return the bottom 10 by that rate, including their seller_id, delivered order count, and on-time rate.",
+              "canonical_metric": "on_time_delivery_rate",
+              "sql": "SELECT oi.seller_id, COUNT(DISTINCT o.order_id) AS delivered_orders, AVG(CASE WHEN o.order_delivered_customer_date <= o.order_estimated_delivery_date THEN 1.0 ELSE 0.0 END) AS on_time_rate FROM olist_orders_dataset AS o JOIN olist_order_items_dataset AS oi ON oi.order_id = o.order_id WHERE o.order_status = 'delivered' AND NOT o.order_delivered_customer_date IS NULL GROUP BY oi.seller_id HAVING COUNT(DISTINCT o.order_id) >= 100 ORDER BY on_time_rate ASC LIMIT 10",
+              "notes": "Used on_time_delivery_rate definition at seller grain via order_items; filtered to delivered orders with non-null delivery date; HAVING COUNT(DISTINCT order_id) >= 100.",
+              "row_count": 10,
+              "sanity": {
+                "passed": true,
+                "severity": "low",
+                "flags": [],
+                "llm_severity": "low",
+                "llm_verdict": "Ten-row bottom ranking with on-time rates spanning 76.4\u201385.2% and delivered order counts 108\u2013389 (all \u2265100 threshold) is consistent with Olist's high baseline delivery performance; the worst performers in a high-volume seller pool legitimately occupy this range.",
+                "llm_concerns": []
+              },
+              "retry_count": 0,
+              "retries_exhausted": false
+            }
+          ],
+          "reconciliation": {
+            "skipped": true,
+            "passed": true,
+            "severity": "low",
+            "delta_pct": null,
+            "note": null,
+            "reason": "Planner emitted no reconciliation_step.",
+            "shape": "skipped",
+            "key_alignment": "n/a",
+            "mean_delta_pct": null,
+            "max_delta_pct": null,
+            "missing_keys_a": [],
+            "missing_keys_b": []
+          },
+          "confidence": {
+            "label": "MEDIUM",
+            "reason": "Reconciliation was not applicable (single-path question); per current policy this is MEDIUM even when sanity is clean, pending a planner annotation to distinguish genuinely-single-path from should-have-been-cross-val.",
+            "derivation": {
+              "planner_answerable": true,
+              "max_retries": 2,
+              "sub_count": 1,
+              "sanity_severities": [
+                "low"
+              ],
+              "retry_counts": [
+                0
+              ],
+              "retries_exhausted_any": false,
+              "recon_skipped": true,
+              "recon_passed": true,
+              "recon_severity": "low"
+            }
+          },
+          "report": {
+            "answer": "Among sellers with at least 100 delivered orders, the ten worst on-time delivery performers have on-time rates ranging from **76.4% to 85.2%**. The single worst performer is seller `06a2c3af7b3aee5d69171b0e14f0ee87` with a 76.4% on-time rate across 389 delivered orders. The full bottom-10 ranking (ascending by on-time rate):\n\n| Seller ID | Delivered Orders | On-Time Rate |\n|---|---|---|\n| 06a2c3af7b3aee5d69171b0e14f0ee87 | 389 | 76.4% |\n| cd68562d3f44870c08922d380acae552 | 122 | 79.8% |\n| 1ca7077d890b907f89be8c954a02686a | 108 | 80.3% |\n| 88460e8ebdecbfecb5f9601833981930 | 246 | 80.3% |\n| e5a3438891c0bfdb9394643f95273d8e | 216 | 81.8% |\n| 8160255418d5aaa7dbdc9f4c64ebda44 | 380 | 82.1% |\n| 2c9e548be18521d1c43cde1c582c6de8 | 124 | 83.0% |\n| f7ba60f8c3f99e7ee4042fdef03b70c4 | 218 | 83.4% |\n| 431af27f296bc6519d890aa5a05fdb11 | 116 | 84.7% |\n| dd7ddc04e1b6c2c614352b383efe2d36 | 121 | 85.2% |\n\nConfidence: MEDIUM",
+            "methodology": "I used a single sub-question: for each seller, compute the fraction of delivered orders where `order_delivered_customer_date <= order_estimated_delivery_date`, restrict to sellers with at least 100 such orders, and return the bottom 10 by that rate. The SQL joined `olist_orders_dataset` to `olist_order_items_dataset` on `order_id`, filtered to `order_status = 'delivered'` and non-null `order_delivered_customer_date`, grouped by `seller_id`, applied a `HAVING COUNT(DISTINCT order_id) >= 100` threshold, and ordered ascending by on-time rate with a limit of 10.",
+            "verification": "\u2713 Sub-question 1 (on-time delivery rate ranking) sanity: clean \u2014 10 rows returned, on-time rates span 76.4\u201385.2% (all within [0,1]), delivered order counts range 108\u2013389 (all at or above the 100-order threshold). Sanity verdict: consistent with Olist's high baseline delivery performance; the worst performers in a high-volume seller pool legitimately occupy this range.\nCross-validation was not applicable \u2014 the planner emitted no reconciliation step, and this ranking has a single canonical definition with no meaningful alternative path.",
+            "caveats": "\u26a0 Confidence is labeled MEDIUM rather than HIGH because this is a single-path question with no cross-validation; per pipeline policy, single-path results are held at MEDIUM pending a planner annotation confirming no alternative definition exists.\n\u26a0 Only sellers with \u2265100 delivered orders are included; lower-volume sellers with worse on-time rates exist but were excluded by design.\n\u26a0 'On-time' is defined as `order_delivered_customer_date <= order_estimated_delivery_date`; the estimated delivery date is the promise made at purchase, which may be set conservatively by some sellers.\n\u26a0 Only orders with `order_status = 'delivered'` and a non-null `order_delivered_customer_date` are counted; orders still in transit or with missing delivery timestamps are excluded."
+          },
+          "usage": {
+            "planner": {
+              "input_tokens": 27,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 13303,
+              "output_tokens": 329,
+              "stop_reason": "end_turn"
+            },
+            "sql_generator": [
+              {
+                "input_tokens": 252,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 12994,
+                "output_tokens": 230,
+                "stop_reason": "end_turn"
+              }
+            ],
+            "sanity": [
+              {
+                "input_tokens": 3029,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 97
+              }
+            ],
+            "reconciliation": {},
+            "presenter": {
+              "input_tokens": 1942,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 3411,
+              "output_tokens": 999,
+              "stop_reason": "end_turn"
+            }
+          },
+          "cost": {
+            "planner": 0.0090069,
+            "sql_generator": 0.008104199999999999,
+            "sanity": 0.0035139999999999998,
+            "reconciliation": 0.0,
+            "presenter": 0.0218343,
+            "total": 0.0424594
+          },
+          "ok": true,
+          "error": null,
+          "wall_time_s": 25.496,
+          "trial_idx": 0
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "category": "tricky",
+      "question": "What is the repeat purchase rate by state?",
+      "expected_confidence": [
+        "MEDIUM",
+        "LOW"
+      ],
+      "expected_scrutiny_trigger": "sanity",
+      "expected_answer_hint": null,
+      "notes": "Customer identity gotcha: customer_id is per-order, customer_unique_id is the stable identity. Wrong key inflates repeat rate. Sanity may catch; if not, a retry after a first-pass miss is a real scrutiny-catch signal.",
+      "trials": [
+        {
+          "plan": {
+            "answerable": true,
+            "unanswerable_reason": null,
+            "n_sub_questions": 1,
+            "reconciliation_step": false,
+            "full": {
+              "restated_question": "For each Brazilian state, what fraction of unique customers placed more than one order?",
+              "answerable": true,
+              "unanswerable_reason": null,
+              "sub_questions": [
+                {
+                  "id": 1,
+                  "question": "For each customer state, compute the repeat customer rate: the number of distinct customer_unique_id values who placed more than one order divided by the total number of distinct customer_unique_id values in that state, expressed as a percentage.",
+                  "canonical_metric": "repeat_customer_rate",
+                  "tables_likely": [
+                    "olist_customers_dataset",
+                    "olist_orders_dataset"
+                  ],
+                  "filters_implied": [
+                    "group by customer_state from olist_customers_dataset",
+                    "use customer_unique_id (not customer_id) to identify unique people",
+                    "count orders per customer_unique_id within each state to determine repeat vs. one-time buyers",
+                    "no order_status filter required unless restricting to non-canceled/non-unavailable orders \u2014 default to all orders"
+                  ],
+                  "aggregation_heavy": true,
+                  "cross_validation_candidate": false
+                }
+              ],
+              "reconciliation_step": null
+            }
+          },
+          "sub_questions": [
+            {
+              "sub_question_id": 1,
+              "question": "For each customer state, compute the repeat customer rate: the number of distinct customer_unique_id values who placed more than one order divided by the total number of distinct customer_unique_id values in that state, expressed as a percentage.",
+              "canonical_metric": "repeat_customer_rate",
+              "sql": "WITH customer_order_counts AS (SELECT c.customer_unique_id, c.customer_state, COUNT(o.order_id) AS order_count FROM olist_customers_dataset AS c JOIN olist_orders_dataset AS o ON o.customer_id = c.customer_id GROUP BY c.customer_unique_id, c.customer_state), state_agg AS (SELECT customer_state, COUNT(*) AS total_unique_customers, SUM(CASE WHEN order_count > 1 THEN 1 ELSE 0 END) AS repeat_customers FROM customer_order_counts GROUP BY customer_state) SELECT customer_state, total_unique_customers, repeat_customers, repeat_customers * 100.0 / NULLIF(total_unique_customers, 0) AS repeat_customer_rate_pct FROM state_agg ORDER BY repeat_customer_rate_pct DESC",
+              "notes": "Used SUM(CASE) instead of COUNT(DISTINCT) for repeat flag to avoid any double-counting; joins orders to get per-person order count before state-level aggregation.",
+              "row_count": 27,
+              "sanity": {
+                "passed": false,
+                "severity": "high",
+                "flags": [
+                  {
+                    "rule": "rate_out_of_range",
+                    "column": "repeat_customer_rate_pct",
+                    "message": "repeat_customer_rate_pct outside [0,1]: min=1.493 max=5.195.",
+                    "severity": "high"
+                  }
+                ],
+                "llm_severity": null,
+                "llm_verdict": null,
+                "llm_concerns": []
+              },
+              "retry_count": 2,
+              "retries_exhausted": true
+            }
+          ],
+          "reconciliation": {
+            "skipped": true,
+            "passed": true,
+            "severity": "low",
+            "delta_pct": null,
+            "note": null,
+            "reason": "Planner emitted no reconciliation_step.",
+            "shape": "skipped",
+            "key_alignment": "n/a",
+            "mean_delta_pct": null,
+            "max_delta_pct": null,
+            "missing_keys_a": [],
+            "missing_keys_b": []
+          },
+          "confidence": {
+            "label": "UNABLE",
+            "reason": "Sub-question(s) [1] exhausted the retry budget (2) with sanity still failing; declining rather than returning an unreliable number.",
+            "derivation": {
+              "planner_answerable": true,
+              "max_retries": 2,
+              "sub_count": 1,
+              "sanity_severities": [
+                "high"
+              ],
+              "retry_counts": [
+                2
+              ],
+              "retries_exhausted_any": true,
+              "recon_skipped": true,
+              "recon_passed": true,
+              "recon_severity": "low"
+            }
+          },
+          "report": {
+            "answer": "I can't answer this reliably. After 2 retry attempts, the sanity checks on the repeat purchase rate query continued to fail, and the pipeline has declined to return the result rather than surface a potentially unreliable number.\n\nConfidence: UNABLE",
+            "methodology": "I decomposed this into a single sub-question: for each Brazilian state, compute the repeat customer rate by joining `olist_customers_dataset` to `olist_orders_dataset`, counting orders per `customer_unique_id` within each state, then calculating the share of those customers with more than one order. The query ran twice after the initial attempt, each time failing the sanity layer's rate-range check.",
+            "verification": "\u26a0 Sub-question 1 sanity: FAILED (high severity) on all attempts including retries. The sanity rule `rate_out_of_range` flagged `repeat_customer_rate_pct` as outside the expected [0, 1] range \u2014 the SQL returns the rate as a percentage (e.g., 5.19, 3.40) rather than a decimal proportion (e.g., 0.0519, 0.034). The pipeline treated this as an unresolved high-severity failure after 2 retries.\nCross-validation was not applicable \u2014 the planner emitted no reconciliation step for this question.",
+            "caveats": "\u26a0 The pipeline declined because the sanity checker enforces a [0, 1] range for rate metrics and the SQL correctly expressed the rate as a percentage (values ~1.5\u20135.2), which the checker interpreted as out-of-range. The underlying numbers may be arithmetically correct, but the pipeline's confidence threshold was not met after the retry budget was exhausted.\n\u26a0 No order status filter was applied \u2014 all orders including canceled and unavailable ones are included in the counts."
+          },
+          "usage": {
+            "planner": {
+              "input_tokens": 16,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 13303,
+              "output_tokens": 302,
+              "stop_reason": "end_turn"
+            },
+            "sql_generator": [
+              {
+                "input_tokens": 258,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 12994,
+                "output_tokens": 255,
+                "stop_reason": "end_turn"
+              },
+              {
+                "input_tokens": 561,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 12994,
+                "output_tokens": 370,
+                "stop_reason": "end_turn"
+              },
+              {
+                "input_tokens": 586,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 12994,
+                "output_tokens": 340,
+                "stop_reason": "end_turn"
+              }
+            ],
+            "sanity": [
+              {},
+              {},
+              {}
+            ],
+            "reconciliation": {},
+            "presenter": {
+              "input_tokens": 1973,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 3411,
+              "output_tokens": 441,
+              "stop_reason": "end_turn"
+            }
+          },
+          "cost": {
+            "planner": 0.0085689,
+            "sql_generator": 0.0303846,
+            "sanity": 0.0,
+            "reconciliation": 0.0,
+            "presenter": 0.0135573,
+            "total": 0.0525108
+          },
+          "ok": true,
+          "error": null,
+          "wall_time_s": 32.313,
+          "trial_idx": 0
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "category": "tricky",
+      "question": "What is the relationship between delivery delay and review score?",
+      "expected_confidence": [
+        "MEDIUM"
+      ],
+      "expected_scrutiny_trigger": "none",
+      "expected_answer_hint": null,
+      "notes": "Orders+reviews multi-table join with a derived delay_days metric. Tests the generator's ability to compose derived columns.",
+      "trials": [
+        {
+          "ok": false,
+          "error": {
+            "type": "SqlValidationError",
+            "message": "notes exceeds 25 words (31): 'Buckets use numeric prefix for deterministic ordering; delivery delta computed as actual minus estimated (negative = early, positive = late), filtered to delivered orders with non-null dates and non-null review scores.'",
+            "traceback": "Traceback (most recent call last):\n  File \"/Users/pavan/agentic-data-analyst/eval/runner.py\", line 175, in _run_single_trial\n    plan, outcomes, recon, confidence, presentation, metrics = run_pipeline(\n                                                               ~~~~~~~~~~~~^\n        question_text,\n        ^^^^^^^^^^^^^^\n    ...<4 lines>...\n        verbose=False,\n        ^^^^^^^^^^^^^^\n    )\n    ^\n  File \"/Users/pavan/agentic-data-analyst/main.py\", line 337, in run_pipeline\n    outcome = _run_sub_question(\n        sq, data_dictionary,\n        engine=engine, client=client, metrics=metrics,\n        max_retries=max_retries, verbose=verbose,\n    )\n  File \"/Users/pavan/agentic-data-analyst/main.py\", line 216, in _run_sub_question\n    generation = generate_and_execute(\n        sub_question.model_dump(),\n    ...<3 lines>...\n        retry_context=retry_context,\n    )\n  File \"/Users/pavan/agentic-data-analyst/agents/sql_generator.py\", line 346, in generate_and_execute\n    validate_notes(parsed.notes)\n    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^\n  File \"/Users/pavan/agentic-data-analyst/agents/sql_generator.py\", line 195, in validate_notes\n    raise SqlValidationError(\n        f\"notes exceeds {NOTES_MAX_WORDS} words ({len(words)}): {notes!r}\"\n    )\nagents.sql_generator.SqlValidationError: notes exceeds 25 words (31): 'Buckets use numeric prefix for deterministic ordering; delivery delta computed as actual minus estimated (negative = early, positive = late), filtered to delivered orders with non-null dates and non-null review scores.'\n"
+          },
+          "wall_time_s": 18.379,
+          "trial_idx": 0
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "category": "tricky",
+      "question": "How did average delivery time change from 2017 to 2018?",
+      "expected_confidence": [
+        "HIGH",
+        "MEDIUM"
+      ],
+      "expected_scrutiny_trigger": "none",
+      "expected_answer_hint": null,
+      "notes": "Time + null handling: must exclude undelivered orders (NULL delivered_customer_date). Failure mode is counting those as zero-delay.",
+      "trials": [
+        {
+          "plan": {
+            "answerable": true,
+            "unanswerable_reason": null,
+            "n_sub_questions": 1,
+            "reconciliation_step": false,
+            "full": {
+              "restated_question": "Compare the average number of days from order placement to customer delivery in 2017 vs. 2018 (through October 2018), for delivered orders only.",
+              "answerable": true,
+              "unanswerable_reason": null,
+              "sub_questions": [
+                {
+                  "id": 1,
+                  "question": "For each calendar year (2017 and 2018), compute the average number of days from order_purchase_timestamp to order_delivered_customer_date, restricted to orders with order_status = 'delivered' and a non-null order_delivered_customer_date.",
+                  "canonical_metric": "avg_delivery_days",
+                  "tables_likely": [
+                    "olist_orders_dataset"
+                  ],
+                  "filters_implied": [
+                    "order_status = 'delivered'",
+                    "order_delivered_customer_date IS NOT NULL",
+                    "EXTRACT(YEAR FROM order_purchase_timestamp) IN (2017, 2018)"
+                  ],
+                  "aggregation_heavy": true,
+                  "cross_validation_candidate": false
+                }
+              ],
+              "reconciliation_step": null
+            }
+          },
+          "sub_questions": [
+            {
+              "sub_question_id": 1,
+              "question": "For each calendar year (2017 and 2018), compute the average number of days from order_purchase_timestamp to order_delivered_customer_date, restricted to orders with order_status = 'delivered' and a non-null order_delivered_customer_date.",
+              "canonical_metric": "avg_delivery_days",
+              "sql": "SELECT EXTRACT(YEAR FROM order_purchase_timestamp) AS year, AVG(EXTRACT(EPOCH FROM (order_delivered_customer_date - order_purchase_timestamp)) / 86400.0) AS avg_delivery_days FROM olist_orders_dataset WHERE order_status = 'delivered' AND NOT order_delivered_customer_date IS NULL AND EXTRACT(YEAR FROM order_purchase_timestamp) IN (2017, 2018) GROUP BY 1 ORDER BY 1",
+              "notes": "Used avg_delivery_days_delivered_only definition; computed days via EPOCH division for sub-day precision; filtered to delivered+non-null and years 2017\u20132018.",
+              "row_count": 2,
+              "sanity": {
+                "passed": true,
+                "severity": "low",
+                "flags": [],
+                "llm_severity": "low",
+                "llm_verdict": "Two-row result with average delivery times of 13.0 days (2017) and 12.1 days (2018) for delivered orders matches the expected shape and falls within a plausible range for e-commerce logistics.",
+                "llm_concerns": []
+              },
+              "retry_count": 0,
+              "retries_exhausted": false
+            }
+          ],
+          "reconciliation": {
+            "skipped": true,
+            "passed": true,
+            "severity": "low",
+            "delta_pct": null,
+            "note": null,
+            "reason": "Planner emitted no reconciliation_step.",
+            "shape": "skipped",
+            "key_alignment": "n/a",
+            "mean_delta_pct": null,
+            "max_delta_pct": null,
+            "missing_keys_a": [],
+            "missing_keys_b": []
+          },
+          "confidence": {
+            "label": "MEDIUM",
+            "reason": "Reconciliation was not applicable (single-path question); per current policy this is MEDIUM even when sanity is clean, pending a planner annotation to distinguish genuinely-single-path from should-have-been-cross-val.",
+            "derivation": {
+              "planner_answerable": true,
+              "max_retries": 2,
+              "sub_count": 1,
+              "sanity_severities": [
+                "low"
+              ],
+              "retry_counts": [
+                0
+              ],
+              "retries_exhausted_any": false,
+              "recon_skipped": true,
+              "recon_passed": true,
+              "recon_severity": "low"
+            }
+          },
+          "report": {
+            "answer": "Average delivery time **improved by roughly 0.9 days** year-over-year: **13.0 days** in 2017, falling to **12.1 days** in 2018 (through October 2018). That represents an approximately **6.8% reduction** in average door-to-door delivery time for delivered orders.\n\nConfidence: MEDIUM",
+            "methodology": "I used a single sub-question: compute the average number of days from `order_purchase_timestamp` to `order_delivered_customer_date`, grouped by calendar year, restricted to 2017 and 2018. Days were calculated using epoch-based division for sub-day precision. Only orders with `order_status = 'delivered'` and a non-null `order_delivered_customer_date` were included. The result returned two rows \u2014 one per year.",
+            "verification": "\u2713 Sub-question 1 (avg delivery days by year) sanity: clean \u2014 two-row result with 2017 at 13.0 days and 2018 at 12.1 days, both within a plausible range for e-commerce logistics; no flags raised.\nCross-validation was not applicable \u2014 the question has a single canonical definition and the planner emitted no reconciliation step.",
+            "caveats": "\u26a0 Confidence is MEDIUM because this is a single-path result with no cross-validation; the figure is internally consistent but has not been verified against an independent calculation.\n\u26a0 Only orders with `order_status = 'delivered'` and a non-null `order_delivered_customer_date` are included; orders that were canceled, unavailable, or never marked delivered are excluded.\n\u26a0 The 2018 figure covers only orders placed in 2018 through October 2018 (the dataset window), not a full calendar year \u2014 the year-over-year comparison may be affected if delivery times are seasonally skewed in the months not yet represented for 2018."
+          },
+          "usage": {
+            "planner": {
+              "input_tokens": 23,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 13303,
+              "output_tokens": 284,
+              "stop_reason": "end_turn"
+            },
+            "sql_generator": [
+              {
+                "input_tokens": 216,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 12994,
+                "output_tokens": 175,
+                "stop_reason": "end_turn"
+              }
+            ],
+            "sanity": [
+              {
+                "input_tokens": 2726,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 82
+              }
+            ],
+            "reconciliation": {},
+            "presenter": {
+              "input_tokens": 1050,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 3411,
+              "output_tokens": 473,
+              "stop_reason": "end_turn"
+            }
+          },
+          "cost": {
+            "planner": 0.0083199,
+            "sql_generator": 0.007171200000000001,
+            "sanity": 0.003136,
+            "reconciliation": 0.0,
+            "presenter": 0.011268299999999998,
+            "total": 0.0298954
+          },
+          "ok": true,
+          "error": null,
+          "wall_time_s": 20.098,
+          "trial_idx": 0
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "category": "tricky",
+      "question": "Which product categories have the highest average review scores?",
+      "expected_confidence": [
+        "HIGH",
+        "MEDIUM"
+      ],
+      "expected_scrutiny_trigger": "none",
+      "expected_answer_hint": null,
+      "notes": "Requires join through order_items to products to product_category_name_translation, plus reviews. Multi-hop join test.",
+      "trials": [
+        {
+          "plan": {
+            "answerable": true,
+            "unanswerable_reason": null,
+            "n_sub_questions": 1,
+            "reconciliation_step": false,
+            "full": {
+              "restated_question": "Rank product categories by their average customer review score, from highest to lowest.",
+              "answerable": true,
+              "unanswerable_reason": null,
+              "sub_questions": [
+                {
+                  "id": 1,
+                  "question": "For each product category (in English), compute the average review score across all orders containing at least one product in that category; return categories ranked from highest to lowest average score.",
+                  "canonical_metric": null,
+                  "tables_likely": [
+                    "olist_order_reviews_dataset",
+                    "olist_orders_dataset",
+                    "olist_order_items_dataset",
+                    "olist_products_dataset",
+                    "product_category_name_translation"
+                  ],
+                  "filters_implied": [
+                    "join reviews to orders on order_id",
+                    "join orders to order_items on order_id",
+                    "join order_items to products on product_id",
+                    "join products to product_category_name_translation on product_category_name",
+                    "exclude products where product_category_name IS NULL",
+                    "exclude categories where product_category_name_english IS NULL (i.e., 'pc_gamer' and 'portateis_cozinha_e_preparadores_de_alimentos')",
+                    "use composite key (review_id, order_id) to avoid duplicate reviews",
+                    "consider reporting category review count alongside average score to surface low-sample categories"
+                  ],
+                  "aggregation_heavy": true,
+                  "cross_validation_candidate": false
+                }
+              ],
+              "reconciliation_step": null
+            }
+          },
+          "sub_questions": [
+            {
+              "sub_question_id": 1,
+              "question": "For each product category (in English), compute the average review score across all orders containing at least one product in that category; return categories ranked from highest to lowest average score.",
+              "canonical_metric": null,
+              "sql": "WITH order_categories AS (SELECT DISTINCT oi.order_id, COALESCE(t.product_category_name_english, p.product_category_name) AS category_name_english FROM olist_order_items_dataset AS oi JOIN olist_products_dataset AS p ON p.product_id = oi.product_id JOIN product_category_name_translation AS t ON t.product_category_name = p.product_category_name WHERE NOT p.product_category_name IS NULL AND NOT t.product_category_name_english IS NULL) SELECT oc.category_name_english, AVG(r.review_score) AS avg_review_score, COUNT(DISTINCT r.order_id) AS review_count FROM olist_order_reviews_dataset AS r JOIN order_categories AS oc ON oc.order_id = r.order_id GROUP BY oc.category_name_english ORDER BY avg_review_score DESC",
+              "notes": "Joined reviews to distinct order-category pairs to avoid inflating scores; excluded NULL Portuguese categories and untranslated English categories ('pc_gamer', 'portateis_cozinha_e_preparadores_de_alimentos').",
+              "row_count": 71,
+              "sanity": {
+                "passed": true,
+                "severity": "low",
+                "flags": [],
+                "llm_severity": "low",
+                "llm_verdict": "Result shape matches the sub-question (71 categories ranked by average score), average scores span a plausible 2.5\u20134.67 range consistent with Olist's review distribution, and the generator notes confirm appropriate deduplication and filtering.",
+                "llm_concerns": []
+              },
+              "retry_count": 0,
+              "retries_exhausted": false
+            }
+          ],
+          "reconciliation": {
+            "skipped": true,
+            "passed": true,
+            "severity": "low",
+            "delta_pct": null,
+            "note": null,
+            "reason": "Planner emitted no reconciliation_step.",
+            "shape": "skipped",
+            "key_alignment": "n/a",
+            "mean_delta_pct": null,
+            "max_delta_pct": null,
+            "missing_keys_a": [],
+            "missing_keys_b": []
+          },
+          "confidence": {
+            "label": "MEDIUM",
+            "reason": "Reconciliation was not applicable (single-path question); per current policy this is MEDIUM even when sanity is clean, pending a planner annotation to distinguish genuinely-single-path from should-have-been-cross-val.",
+            "derivation": {
+              "planner_answerable": true,
+              "max_retries": 2,
+              "sub_count": 1,
+              "sanity_severities": [
+                "low"
+              ],
+              "retry_counts": [
+                0
+              ],
+              "retries_exhausted_any": false,
+              "recon_skipped": true,
+              "recon_passed": true,
+              "recon_severity": "low"
+            }
+          },
+          "report": {
+            "answer": "The top product categories by average customer review score are:\n\n1. **cds_dvds_musicals** \u2014 4.67 avg score (12 reviews)\n2. **fashion_childrens_clothes** \u2014 4.50 avg score (8 reviews)\n3. **books_general_interest** \u2014 4.46 avg score (508 reviews)\n4. **costruction_tools_tools** \u2014 4.43 avg score (94 reviews)\n5. **books_technical** \u2014 4.41 avg score (257 reviews)\n\nThe full result covers all 71 translated product categories, with average scores ranging from 2.50 to 4.67 across the dataset.\n\nConfidence: MEDIUM",
+            "methodology": "I used a single sub-question: for each product category (using the English translation), compute the average review score across all orders containing at least one product in that category, then rank categories from highest to lowest. The SQL joined `olist_order_reviews_dataset` to a CTE of distinct order\u2013category pairs (built from `olist_order_items_dataset`, `olist_products_dataset`, and `product_category_name_translation`) to avoid inflating scores when an order contains multiple items in the same category. Review count per category was included alongside the average to surface low-sample categories. Cross-validation was not applicable \u2014 average review score by category has a single canonical definition and the planner emitted no reconciliation step.",
+            "verification": "\u2713 Sub-question 1 sanity: clean \u2014 71 rows returned, average scores span a plausible 2.50\u20134.67 range consistent with Olist's review distribution, and the generator confirmed appropriate deduplication and filtering. No flags were raised.\nCross-validation was not applicable \u2014 the question has a single definition and the planner emitted no reconciliation step.\nNo retries were required (retry_count = 0).",
+            "caveats": "\u26a0 The top two categories (**cds_dvds_musicals**, 12 reviews; **fashion_childrens_clothes**, 8 reviews) have very low review counts, so their high averages may not be statistically stable.\n\u26a0 Two untranslated categories \u2014 `pc_gamer` and `portateis_cozinha_e_preparadores_de_alimentos` \u2014 are excluded because they lack English translations in the translation table.\n\u26a0 Products with a NULL `product_category_name` are also excluded.\n\u26a0 Confidence is MEDIUM because this is a single-path result with no cross-validation; per pipeline policy, single-path questions are capped at MEDIUM pending a planner annotation confirming the question is genuinely single-definition."
+          },
+          "usage": {
+            "planner": {
+              "input_tokens": 17,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 13303,
+              "output_tokens": 398,
+              "stop_reason": "end_turn"
+            },
+            "sql_generator": [
+              {
+                "input_tokens": 343,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 12994,
+                "output_tokens": 291,
+                "stop_reason": "end_turn"
+              }
+            ],
+            "sanity": [
+              {
+                "input_tokens": 3069,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 85
+              }
+            ],
+            "reconciliation": {},
+            "presenter": {
+              "input_tokens": 1830,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 3411,
+              "output_tokens": 654,
+              "stop_reason": "end_turn"
+            }
+          },
+          "cost": {
+            "planner": 0.0100119,
+            "sql_generator": 0.0092922,
+            "sanity": 0.003494,
+            "reconciliation": 0.0,
+            "presenter": 0.0163233,
+            "total": 0.0391214
+          },
+          "ok": true,
+          "error": null,
+          "wall_time_s": 28.54,
+          "trial_idx": 0
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "category": "tricky",
+      "question": "What is revenue by payment method, and does it differ by calculation approach?",
+      "expected_confidence": [
+        "HIGH",
+        "MEDIUM"
+      ],
+      "expected_scrutiny_trigger": "cross_validation",
+      "expected_answer_hint": null,
+      "notes": "Question explicitly asks for reconciliation, so the planner MUST fan out. Good stress on cross-val handling of multi-row shapes.",
+      "trials": [
+        {
+          "plan": {
+            "answerable": true,
+            "unanswerable_reason": null,
+            "n_sub_questions": 2,
+            "reconciliation_step": true,
+            "full": {
+              "restated_question": "Break down total revenue by payment method (credit_card, boleto, voucher, debit_card), and compare whether the payment-based vs. item-based revenue calculation approaches yield different totals \u2014 with reconciliation across both methods.",
+              "answerable": true,
+              "unanswerable_reason": null,
+              "sub_questions": [
+                {
+                  "id": 1,
+                  "question": "For each payment_type, compute total revenue as SUM(payment_value), grouping by payment_type, excluding payment_type = 'not_defined'. Also compute the overall total for reconciliation.",
+                  "canonical_metric": "revenue",
+                  "tables_likely": [
+                    "olist_orders_dataset",
+                    "olist_order_payments_dataset"
+                  ],
+                  "filters_implied": [
+                    "payment_type <> 'not_defined'",
+                    "order_status NOT IN ('canceled', 'unavailable')"
+                  ],
+                  "aggregation_heavy": true,
+                  "cross_validation_candidate": true
+                },
+                {
+                  "id": 2,
+                  "question": "Compute total revenue as SUM(olist_order_items_dataset.price) + SUM(olist_order_items_dataset.freight_value) across all non-canceled, non-unavailable orders, to serve as the item-based grand total for reconciliation against sub-question 1's overall total. Note: item-based revenue cannot be broken down by payment method because payment method is stored in a separate table with potentially multiple payment rows per order.",
+                  "canonical_metric": "revenue",
+                  "tables_likely": [
+                    "olist_orders_dataset",
+                    "olist_order_items_dataset"
+                  ],
+                  "filters_implied": [
+                    "order_status NOT IN ('canceled', 'unavailable')"
+                  ],
+                  "aggregation_heavy": true,
+                  "cross_validation_candidate": true
+                }
+              ],
+              "reconciliation_step": "The grand total from sub-question 1 (SUM of payment_value across all non-canceled/unavailable orders, excluding 'not_defined' payment_type) should match the grand total from sub-question 2 (SUM of price + freight_value from order_items for non-canceled/unavailable orders) within ~0.02%. A delta larger than 0.5% indicates a SQL error or unexpected data anomaly. The payment-method breakdown is only available via sub-question 1; sub-question 2 provides the cross-check total only."
+            }
+          },
+          "sub_questions": [
+            {
+              "sub_question_id": 1,
+              "question": "For each payment_type, compute total revenue as SUM(payment_value), grouping by payment_type, excluding payment_type = 'not_defined'. Also compute the overall total for reconciliation.",
+              "canonical_metric": "revenue",
+              "sql": "WITH filtered_payments AS (SELECT p.payment_type, p.payment_value FROM olist_order_payments_dataset AS p JOIN olist_orders_dataset AS o ON o.order_id = p.order_id WHERE p.payment_type <> 'not_defined' AND NOT o.order_status IN ('canceled', 'unavailable')) SELECT payment_type, SUM(payment_value) AS total_revenue FROM filtered_payments GROUP BY GROUPING SETS ((payment_type), ()) ORDER BY payment_type",
+              "notes": "Used revenue_from_payments definition; excluded payment_type='not_defined' and canceled/unavailable orders; GROUPING SETS produces per-type rows plus an overall total (NULL payment_type).",
+              "row_count": 5,
+              "sanity": {
+                "passed": true,
+                "severity": "medium",
+                "flags": [],
+                "llm_severity": "medium",
+                "llm_verdict": "Result shape and magnitudes are plausible, but the inclusion of a NULL payment_type row as the overall total is inconsistent with the stated exclusion filter and may confuse downstream reconciliation.",
+                "llm_concerns": [
+                  "payment_type = null row with total_revenue = 15,739,137.01 appears to be the overall total, but the sub-question explicitly excludes payment_type = 'not_defined' and does not clarify whether NULL should be included or treated as a grand total",
+                  "sum of four named payment types (2.8M + 12.4M + 0.2M + 0.3M = ~15.7M) equals the NULL row value, confirming it is a rollup, not a separate payment method",
+                  "NULL payment_type in the result violates the semantic intent of 'excluding payment_type = not_defined' unless NULL and 'not_defined' are intentionally distinct categories"
+                ]
+              },
+              "retry_count": 0,
+              "retries_exhausted": false
+            },
+            {
+              "sub_question_id": 2,
+              "question": "Compute total revenue as SUM(olist_order_items_dataset.price) + SUM(olist_order_items_dataset.freight_value) across all non-canceled, non-unavailable orders, to serve as the item-based grand total for reconciliation against sub-question 1's overall total. Note: item-based revenue cannot be broken down by payment method because payment method is stored in a separate table with potentially multiple payment rows per order.",
+              "canonical_metric": "revenue",
+              "sql": "SELECT SUM(oi.price) + SUM(oi.freight_value) AS total_revenue_items_based FROM olist_order_items_dataset AS oi JOIN olist_orders_dataset AS o ON o.order_id = oi.order_id WHERE NOT o.order_status IN ('canceled', 'unavailable')",
+              "notes": "Used revenue_from_items_and_freight definition; joined to orders to apply non-canceled/non-unavailable filter.",
+              "row_count": 1,
+              "sanity": {
+                "passed": true,
+                "severity": "low",
+                "flags": [],
+                "llm_severity": "low",
+                "llm_verdict": "Single-row item-based revenue of ~$15.74M is plausible for the full Olist dataset (2016\u20132018) and consistent with the expected magnitude of quarterly revenues aggregated across all periods.",
+                "llm_concerns": []
+              },
+              "retry_count": 0,
+              "retries_exhausted": false
+            }
+          ],
+          "reconciliation": {
+            "skipped": false,
+            "passed": false,
+            "severity": "high",
+            "delta_pct": null,
+            "note": null,
+            "reason": "Sibling shape mismatch: some return a single scalar, others return multi-row tables; reconciliation is invalid.",
+            "shape": "invalid",
+            "key_alignment": "n/a",
+            "mean_delta_pct": null,
+            "max_delta_pct": null,
+            "missing_keys_a": [],
+            "missing_keys_b": []
+          },
+          "confidence": {
+            "label": "LOW",
+            "reason": "Reconciliation mismatch at severity=high (delta=None); per design we do not auto-retry on reconciliation failure, so the answer is surfaced with LOW confidence.",
+            "derivation": {
+              "planner_answerable": true,
+              "max_retries": 2,
+              "sub_count": 2,
+              "sanity_severities": [
+                "medium",
+                "low"
+              ],
+              "retry_counts": [
+                0,
+                0
+              ],
+              "retries_exhausted_any": false,
+              "recon_skipped": false,
+              "recon_passed": false,
+              "recon_severity": "high"
+            }
+          },
+          "report": {
+            "answer": "Revenue by payment method (payments-based approach, excluding 'not_defined' and canceled/unavailable orders):\n\n- **Credit card:** $12,350,042.56\n- **Boleto:** $2,826,802.30\n- **Voucher:** $349,874.40\n- **Debit card:** $212,417.75\n- **Grand total (payments):** $15,739,137.01\n\nThe item-based cross-check (price + freight) yields **$15,735,527.03** \u2014 a difference of **$3,609.98** (~0.023%) from the payments total. The two figures are numerically close, but the automated reconciliation layer flagged a **shape mismatch** (one path returned a multi-row grouped table, the other a single scalar), preventing a formal cross-validation pass.\n\nConfidence: LOW",
+            "methodology": "I decomposed this into two sub-questions to both answer the breakdown question and cross-validate the grand total via an independent calculation path:\n\n1. **Sub-question 1 (payments-based breakdown):** Summed `payment_value` from `olist_order_payments_dataset`, grouped by `payment_type` using `GROUPING SETS` to produce both per-method totals and an overall grand total in one query. Excluded `payment_type = 'not_defined'` and orders with status `canceled` or `unavailable`.\n2. **Sub-question 2 (items-based cross-check):** Summed `price + freight_value` from `olist_order_items_dataset`, joined to `olist_orders_dataset` to apply the same canceled/unavailable exclusion. This path cannot produce a payment-method breakdown \u2014 it serves only as a grand-total cross-check.\n\nThe plan's reconciliation step was to compare the grand totals from both paths and flag any delta above 0.5%.",
+            "verification": "\u2713 Sub-question 1 (payments breakdown) sanity: **medium severity** \u2014 the query result is structurally correct and the four named payment-type values sum to $15,739,137.01, confirming the NULL row is a GROUPING SETS rollup, not a spurious record. The sanity checker flagged that the NULL `payment_type` grand-total row could be confused with an actual payment type, and noted ambiguity between NULL and 'not_defined'. No retry was required.\n\u2713 Sub-question 2 (items-based total) sanity: clean \u2014 single-row result of $15,735,527.03, consistent with expected Olist full-dataset magnitude.\n\u26a0 Cross-validation: **FAILED at shape level.** The reconciliation layer determined the sibling results had incompatible shapes (multi-row table vs. single scalar) and marked the outcome invalid rather than computing a delta. Manually, the two grand totals differ by $3,609.98 (~0.023%), which is within the plan's 0.5% tolerance \u2014 but because the automated reconciliation did not pass, confidence is labeled LOW per pipeline design.\nNo retries were needed for either sub-question (both `retry_count = 0`).",
+            "caveats": "\u26a0 Confidence is LOW due to a reconciliation shape mismatch in the automated layer. The numeric delta between the two approaches (~0.023%) is within the plan's stated tolerance, but the pipeline does not auto-upgrade confidence when reconciliation fails on shape grounds \u2014 review the SQL and results directly if using these figures in downstream reporting.\n\u26a0 Orders with status `canceled` or `unavailable` are excluded from both calculations.\n\u26a0 Rows with `payment_type = 'not_defined'` are excluded from the payments-based total and breakdown.\n\u26a0 The NULL row in sub-question 1's result is the GROUPING SETS grand-total rollup, not a distinct payment method or a 'not_defined' record \u2014 confirmed by the four named types summing exactly to $15,739,137.01.\n\u26a0 The payment-method breakdown is only available via the payments path; the items+freight path cannot be split by payment method because payment data is stored in a separate table with potentially multiple rows per order."
+          },
+          "usage": {
+            "planner": {
+              "input_tokens": 22,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 13303,
+              "output_tokens": 601,
+              "stop_reason": "end_turn"
+            },
+            "sql_generator": [
+              {
+                "input_tokens": 191,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 12994,
+                "output_tokens": 226,
+                "stop_reason": "end_turn"
+              },
+              {
+                "input_tokens": 232,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 12994,
+                "output_tokens": 127,
+                "stop_reason": "end_turn"
+              }
+            ],
+            "sanity": [
+              {
+                "input_tokens": 2724,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 241
+              },
+              {
+                "input_tokens": 2606,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 78
+              }
+            ],
+            "reconciliation": {},
+            "presenter": {
+              "input_tokens": 1985,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 3411,
+              "output_tokens": 1006,
+              "stop_reason": "end_turn"
+            }
+          },
+          "cost": {
+            "planner": 0.0130719,
+            "sql_generator": 0.014360399999999999,
+            "sanity": 0.006925000000000001,
+            "reconciliation": 0.0,
+            "presenter": 0.0220683,
+            "total": 0.0564256
+          },
+          "ok": true,
+          "error": null,
+          "wall_time_s": 42.293,
+          "trial_idx": 0
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "category": "unanswerable",
+      "question": "What is customer acquisition cost (CAC)?",
+      "expected_confidence": [
+        "UNABLE"
+      ],
+      "expected_scrutiny_trigger": "none",
+      "expected_answer_hint": null,
+      "notes": "No marketing spend or acquisition-channel data. Planner must refuse without offering a proxy.",
+      "trials": [
+        {
+          "plan": {
+            "answerable": false,
+            "unanswerable_reason": "CAC requires marketing spend, advertising costs, or other customer acquisition expenditure data, which is entirely absent from this dataset. The unanswerable_question_hints explicitly state: 'No cost of goods sold (COGS), marketing spend, salaries, or overhead. Profit, margin, CAC, LTV, ROI, break-even, and unit economics are unanswerable.' While the number of unique customers is computable, the spend-side numerator of CAC does not exist in any table in the data dictionary.",
+            "n_sub_questions": 0,
+            "reconciliation_step": false,
+            "full": {
+              "restated_question": "Calculate the customer acquisition cost (CAC), i.e., marketing or acquisition spend divided by the number of new customers acquired.",
+              "answerable": false,
+              "unanswerable_reason": "CAC requires marketing spend, advertising costs, or other customer acquisition expenditure data, which is entirely absent from this dataset. The unanswerable_question_hints explicitly state: 'No cost of goods sold (COGS), marketing spend, salaries, or overhead. Profit, margin, CAC, LTV, ROI, break-even, and unit economics are unanswerable.' While the number of unique customers is computable, the spend-side numerator of CAC does not exist in any table in the data dictionary.",
+              "sub_questions": [],
+              "reconciliation_step": null
+            }
+          },
+          "sub_questions": [],
+          "reconciliation": null,
+          "confidence": {
+            "label": "UNABLE",
+            "reason": "Planner declined: CAC requires marketing spend, advertising costs, or other customer acquisition expenditure data, which is entirely absent from this dataset. The unanswerable_question_hints explicitly state: 'No cost of goods sold (COGS), marketing spend, salaries, or overhead. Profit, margin, CAC, LTV, ROI, break-even, and unit economics are unanswerable.' While the number of unique customers is computable, the spend-side numerator of CAC does not exist in any table in the data dictionary.",
+            "derivation": {
+              "planner_answerable": false,
+              "max_retries": 2,
+              "sub_count": 0,
+              "sanity_severities": [],
+              "retry_counts": [],
+              "retries_exhausted_any": false,
+              "recon_skipped": true,
+              "recon_passed": true,
+              "recon_severity": "low"
+            }
+          },
+          "report": {
+            "answer": "I can't answer this reliably. CAC requires marketing spend, advertising costs, or other customer acquisition expenditure data \u2014 none of which exists in this dataset. While the number of unique customers is computable, the spend-side numerator of CAC does not exist in any table in the data dictionary, making the calculation impossible.\n\nConfidence: UNABLE",
+            "methodology": "The planner recognized that CAC is defined as marketing or acquisition spend divided by the number of new customers acquired. The dataset's tables cover orders, customers, products, reviews, and payments \u2014 none carry any marketing spend, advertising costs, salaries, or overhead figures. Because the numerator cannot be constructed from any available table, the question was declined at the planning stage rather than returning a misleading proxy metric.",
+            "verification": "The pipeline declined at the planning stage; no SQL was generated, so no sanity checks or cross-validation ran.",
+            "caveats": "\u26a0 The dataset explicitly contains no cost of goods sold (COGS), marketing spend, salaries, or overhead. Per the data dictionary guidance, profit, margin, CAC, LTV, ROI, break-even, and unit economics are all unanswerable from this data.\n\u26a0 To compute CAC, you would need a separate marketing or advertising spend feed with a defined acquisition window to pair against the new-customer counts that are available here."
+          },
+          "usage": {
+            "planner": {
+              "input_tokens": 16,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 13303,
+              "output_tokens": 197,
+              "stop_reason": "end_turn"
+            },
+            "sql_generator": [],
+            "sanity": [],
+            "reconciliation": {},
+            "presenter": {
+              "input_tokens": 444,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 3411,
+              "output_tokens": 323,
+              "stop_reason": "end_turn"
+            }
+          },
+          "cost": {
+            "planner": 0.006993900000000001,
+            "sql_generator": 0,
+            "sanity": 0,
+            "reconciliation": 0.0,
+            "presenter": 0.0072003,
+            "total": 0.0141942
+          },
+          "ok": true,
+          "error": null,
+          "wall_time_s": 11.775,
+          "trial_idx": 0
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "category": "unanswerable",
+      "question": "What was profit margin in 2018?",
+      "expected_confidence": [
+        "UNABLE"
+      ],
+      "expected_scrutiny_trigger": "none",
+      "expected_answer_hint": null,
+      "notes": "No COGS or cost data. Planner must refuse without substituting revenue.",
+      "trials": [
+        {
+          "plan": {
+            "answerable": false,
+            "unanswerable_reason": "The dataset contains no cost of goods sold (COGS), overhead, or any other cost data. Profit and margin are therefore impossible to compute. This matches the unanswerable_question_hints entry: 'No cost of goods sold (COGS), marketing spend, salaries, or overhead. Profit, margin, CAC, LTV, ROI, break-even, and unit economics are unanswerable.' Revenue for 2018 is computable, but substituting revenue for margin would not answer the question asked.",
+            "n_sub_questions": 0,
+            "reconciliation_step": false,
+            "full": {
+              "restated_question": "Profit margin (revenue minus costs divided by revenue) for the year 2018.",
+              "answerable": false,
+              "unanswerable_reason": "The dataset contains no cost of goods sold (COGS), overhead, or any other cost data. Profit and margin are therefore impossible to compute. This matches the unanswerable_question_hints entry: 'No cost of goods sold (COGS), marketing spend, salaries, or overhead. Profit, margin, CAC, LTV, ROI, break-even, and unit economics are unanswerable.' Revenue for 2018 is computable, but substituting revenue for margin would not answer the question asked.",
+              "sub_questions": [],
+              "reconciliation_step": null
+            }
+          },
+          "sub_questions": [],
+          "reconciliation": null,
+          "confidence": {
+            "label": "UNABLE",
+            "reason": "Planner declined: The dataset contains no cost of goods sold (COGS), overhead, or any other cost data. Profit and margin are therefore impossible to compute. This matches the unanswerable_question_hints entry: 'No cost of goods sold (COGS), marketing spend, salaries, or overhead. Profit, margin, CAC, LTV, ROI, break-even, and unit economics are unanswerable.' Revenue for 2018 is computable, but substituting revenue for margin would not answer the question asked.",
+            "derivation": {
+              "planner_answerable": false,
+              "max_retries": 2,
+              "sub_count": 0,
+              "sanity_severities": [],
+              "retry_counts": [],
+              "retries_exhausted_any": false,
+              "recon_skipped": true,
+              "recon_passed": true,
+              "recon_severity": "low"
+            }
+          },
+          "report": {
+            "answer": "I can't answer this reliably. The dataset contains no cost of goods sold (COGS), overhead, or any other cost data, making it impossible to compute profit or profit margin. While 2018 revenue is computable from the data, substituting revenue for margin would not answer the question asked.\n\nConfidence: UNABLE",
+            "methodology": "The planner recognized that profit margin requires both (a) revenue and (b) cost data (e.g., COGS, overhead). The Olist tables cover orders, customers, products, payments, and reviews \u2014 none of which carry cost figures \u2014 so the question was declined at the planning stage rather than returning a misleading revenue-only proxy.",
+            "verification": "The pipeline declined at the planning stage; no SQL was generated, so no sanity checks or cross-validation ran.",
+            "caveats": "\u26a0 To answer this question, you would need cost data \u2014 at minimum COGS per product or order \u2014 which is not present in this dataset. Profit, margin, CAC, LTV, ROI, break-even, and unit economics are all unanswerable with the available tables."
+          },
+          "usage": {
+            "planner": {
+              "input_tokens": 16,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 13303,
+              "output_tokens": 189,
+              "stop_reason": "end_turn"
+            },
+            "sql_generator": [],
+            "sanity": [],
+            "reconciliation": {},
+            "presenter": {
+              "input_tokens": 436,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 3411,
+              "output_tokens": 273,
+              "stop_reason": "end_turn"
+            }
+          },
+          "cost": {
+            "planner": 0.0068739000000000005,
+            "sql_generator": 0,
+            "sanity": 0,
+            "reconciliation": 0.0,
+            "presenter": 0.006426300000000001,
+            "total": 0.013300200000000002
+          },
+          "ok": true,
+          "error": null,
+          "wall_time_s": 8.771,
+          "trial_idx": 0
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "category": "unanswerable",
+      "question": "What will revenue be next quarter?",
+      "expected_confidence": [
+        "UNABLE"
+      ],
+      "expected_scrutiny_trigger": "none",
+      "expected_answer_hint": null,
+      "notes": "Temporal impossibility \u2014 dataset ends in 2018. Planner must refuse rather than extrapolate.",
+      "trials": [
+        {
+          "plan": {
+            "answerable": false,
+            "unanswerable_reason": "The dataset's time coverage ends on 2018-10-17. 'Next quarter' refers to Q4 2018 (partially) or Q1 2019 and beyond \u2014 both outside the dataset's observable range. Additionally, the dataset contains no forecasting model, no forward-looking signals, and no data beyond October 2018. Per the unanswerable_question_hints: 'Time coverage is 2016-09-04 through 2018-10-17. Questions about ... post-October 2018 are unanswerable.' Revenue forecasting also requires cost, trend modeling, or external data not present in this dataset.",
+            "n_sub_questions": 0,
+            "reconciliation_step": false,
+            "full": {
+              "restated_question": "Forecast revenue for the next quarter (i.e., a future period beyond the dataset's coverage).",
+              "answerable": false,
+              "unanswerable_reason": "The dataset's time coverage ends on 2018-10-17. 'Next quarter' refers to Q4 2018 (partially) or Q1 2019 and beyond \u2014 both outside the dataset's observable range. Additionally, the dataset contains no forecasting model, no forward-looking signals, and no data beyond October 2018. Per the unanswerable_question_hints: 'Time coverage is 2016-09-04 through 2018-10-17. Questions about ... post-October 2018 are unanswerable.' Revenue forecasting also requires cost, trend modeling, or external data not present in this dataset.",
+              "sub_questions": [],
+              "reconciliation_step": null
+            }
+          },
+          "sub_questions": [],
+          "reconciliation": null,
+          "confidence": {
+            "label": "UNABLE",
+            "reason": "Planner declined: The dataset's time coverage ends on 2018-10-17. 'Next quarter' refers to Q4 2018 (partially) or Q1 2019 and beyond \u2014 both outside the dataset's observable range. Additionally, the dataset contains no forecasting model, no forward-looking signals, and no data beyond October 2018. Per the unanswerable_question_hints: 'Time coverage is 2016-09-04 through 2018-10-17. Questions about ... post-October 2018 are unanswerable.' Revenue forecasting also requires cost, trend modeling, or external data not present in this dataset.",
+            "derivation": {
+              "planner_answerable": false,
+              "max_retries": 2,
+              "sub_count": 0,
+              "sanity_severities": [],
+              "retry_counts": [],
+              "retries_exhausted_any": false,
+              "recon_skipped": true,
+              "recon_passed": true,
+              "recon_severity": "low"
+            }
+          },
+          "report": {
+            "answer": "I can't answer this reliably. The dataset's time coverage ends on 2018-10-17, and 'next quarter' refers to Q4 2018 (partially) or Q1 2019 and beyond \u2014 both outside the dataset's observable range. No forecasting model, forward-looking signals, or data beyond October 2018 exists in this dataset, so any revenue forecast would be fabricated rather than derived.\n\nConfidence: UNABLE",
+            "methodology": "The planner identified that answering this question requires either (a) data beyond 2018-10-17, or (b) a forecasting model or trend-projection capability \u2014 none of which are present in the Olist dataset. The question was declined at the planning stage; no SQL was generated.",
+            "verification": "The pipeline declined at the planning stage; no SQL was generated, so no sanity checks or cross-validation ran.",
+            "caveats": "\u26a0 The dataset covers 2016-09-04 through 2018-10-17 only. Questions about periods after October 2018 are unanswerable with this data.\n\u26a0 Revenue forecasting additionally requires cost data, trend modeling, or external signals not present in this dataset."
+          },
+          "usage": {
+            "planner": {
+              "input_tokens": 14,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 13303,
+              "output_tokens": 220,
+              "stop_reason": "end_turn"
+            },
+            "sql_generator": [],
+            "sanity": [],
+            "reconciliation": {},
+            "presenter": {
+              "input_tokens": 500,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 3411,
+              "output_tokens": 296,
+              "stop_reason": "end_turn"
+            }
+          },
+          "cost": {
+            "planner": 0.007332900000000001,
+            "sql_generator": 0,
+            "sanity": 0,
+            "reconciliation": 0.0,
+            "presenter": 0.0069632999999999995,
+            "total": 0.0142962
+          },
+          "ok": true,
+          "error": null,
+          "wall_time_s": 10.579,
+          "trial_idx": 0
+        }
+      ]
+    }
+  ]
+}

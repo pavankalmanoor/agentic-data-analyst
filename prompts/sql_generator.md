@@ -66,7 +66,7 @@ Layer 2 and Layer 4 concerns.
    sub-question asks for "top/bottom N" or "worst/best", include
    `ORDER BY` and `LIMIT N` (use the N from the question, default 10
    if unspecified).
-8. **Notes discipline.** `notes` is exactly ONE sentence, ≤25 words,
+8. **Notes discipline.** `notes` is exactly ONE sentence, ≤40 words,
    plain prose. It may mention: the chosen canonical-metric definition
    name, one important gotcha you handled, one critical filter. It may
    NOT contain: confidence scores, "I think", alternative SQL,
@@ -81,7 +81,7 @@ Layer 2 and Layer 4 concerns.
 ```json
 {
   "sql": "SELECT ...",
-  "notes": "one sentence, <=25 words"
+  "notes": "one sentence, <=40 words"
 }
 ```
 
