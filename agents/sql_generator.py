@@ -215,6 +215,43 @@ def _execute_readonly(engine, sql: str, *, timeout_s: int = MAX_QUERY_SECONDS) -
 # ---------------------------------------------------------------------------
 # Core generator
 # ---------------------------------------------------------------------------
+def _format_retry_context(retry_context: dict[str, Any]) -> str:
+    """Structured retry feedback block for the user message.
+
+    Takes a dict with any of:
+      - ``severity``         — sanity severity that fired (e.g., "high")
+      - ``rule_flags``       — list of rule names that fired
+      - ``verdict``          — one-sentence sanity verdict from Haiku
+      - ``concerns``         — list[str] of LLM-level concerns
+      - ``reason``           — short prose explaining why the retry is needed
+      - ``previous_sql``     — the SQL the previous attempt emitted
+
+    Emits a compact text block. Generator reads this as signal that the
+    previous attempt failed sanity and should be corrected — not as
+    negotiation or policy.
+    """
+    lines = [
+        "A previous attempt at this sub-question failed sanity checks. "
+        "Revise the SQL to address the issues below. Do not repeat the "
+        "same query."
+    ]
+    if (sev := retry_context.get("severity")):
+        lines.append(f"Severity: {sev}")
+    if (flags := retry_context.get("rule_flags")):
+        lines.append("Rule flags: " + ", ".join(str(f) for f in flags))
+    if (verdict := retry_context.get("verdict")):
+        lines.append(f"Verdict: {verdict}")
+    if (concerns := retry_context.get("concerns")):
+        lines.append("Concerns:")
+        for c in concerns:
+            lines.append(f"  - {c}")
+    if (reason := retry_context.get("reason")):
+        lines.append(f"Reason: {reason}")
+    if (prev_sql := retry_context.get("previous_sql")):
+        lines.append("Previous SQL (do not repeat):\n```sql\n" + prev_sql.strip() + "\n```")
+    return "\n".join(lines)
+
+
 def generate_and_execute(
     sub_question: dict[str, Any],
     data_dictionary: dict[str, Any],
@@ -222,11 +259,17 @@ def generate_and_execute(
     engine=None,
     client: Anthropic | None = None,
     row_cap: int = DEFAULT_ROW_CAP,
+    retry_context: dict[str, Any] | None = None,
 ) -> GenerationResult:
     """Generate SQL for one sub-question, validate it, and execute it.
 
     ``sub_question`` is a dict matching the planner's ``SubQuestion``
     schema (the test harness typically passes ``.model_dump()`` output).
+
+    ``retry_context`` is an optional dict of structured failure feedback
+    from a prior attempt's sanity check. When provided, it is appended
+    (uncached) to the user message so the generator can correct its
+    previous SQL. See ``_format_retry_context`` for the expected keys.
     """
     if client is None:
         client = Anthropic()
@@ -236,6 +279,35 @@ def generate_and_execute(
     system_prompt = PROMPT_PATH.read_text()
     dictionary_json = json.dumps(data_dictionary, indent=2)
     sub_q_json = json.dumps(sub_question, indent=2)
+
+    user_content: list[dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": (
+                "data_dictionary (ground truth):\n\n"
+                "```json\n" + dictionary_json + "\n```"
+            ),
+            "cache_control": {"type": "ephemeral"},
+        },
+        {
+            "type": "text",
+            "text": (
+                "sub_question:\n\n"
+                "```json\n" + sub_q_json + "\n```\n\n"
+                "Return only the JSON object per the system prompt."
+            ),
+        },
+    ]
+    if retry_context:
+        # Retry feedback sits AFTER the sub_question so the model reads
+        # the task first, then the correction. Uncached because the
+        # retry block is one-shot per attempt.
+        user_content.append(
+            {
+                "type": "text",
+                "text": _format_retry_context(retry_context),
+            }
+        )
 
     response = client.messages.create(
         model=MODEL,
@@ -247,29 +319,7 @@ def generate_and_execute(
                 "cache_control": {"type": "ephemeral"},
             }
         ],
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            "data_dictionary (ground truth):\n\n"
-                            "```json\n" + dictionary_json + "\n```"
-                        ),
-                        "cache_control": {"type": "ephemeral"},
-                    },
-                    {
-                        "type": "text",
-                        "text": (
-                            "sub_question:\n\n"
-                            "```json\n" + sub_q_json + "\n```\n\n"
-                            "Return only the JSON object per the system prompt."
-                        ),
-                    },
-                ],
-            }
-        ],
+        messages=[{"role": "user", "content": user_content}],
     )
 
     u = response.usage
