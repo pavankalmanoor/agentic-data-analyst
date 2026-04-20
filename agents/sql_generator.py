@@ -40,6 +40,7 @@ from anthropic import Anthropic
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from agents.query_planner import load_data_dictionary
 from db.connection import get_engine
@@ -105,6 +106,42 @@ class GenerationResult:
 
 
 # ---------------------------------------------------------------------------
+# Retryable failure — lifted up to the orchestrator's retry loop.
+# ---------------------------------------------------------------------------
+class GeneratorRetryableError(Exception):
+    """One attempt of the generator failed in a way the orchestrator can
+    retry with structured feedback.
+
+    ``kind`` identifies which validation/execution layer failed so the
+    retry prompt can speak to it precisely:
+
+      - ``"json_decode"``  — model output was not valid JSON.
+      - ``"json_schema"``  — JSON parsed but didn't match GeneratorOutput.
+      - ``"sql_execute"``  — SQL parsed and validated but the DB refused
+                             to execute it (e.g. Postgres DISTINCT-in-
+                             window, UNION ORDER BY expression).
+
+    ``previous_sql`` is the SQL that reached the DB, when applicable.
+    ``raw_output`` is the model's raw text, useful for JSON failures so
+    the next attempt can see exactly what it just emitted.
+    """
+
+    def __init__(
+        self,
+        kind: str,
+        message: str,
+        *,
+        previous_sql: str | None = None,
+        raw_output: str | None = None,
+    ) -> None:
+        super().__init__(f"[{kind}] {message}")
+        self.kind = kind
+        self.message = message
+        self.previous_sql = previous_sql
+        self.raw_output = raw_output
+
+
+# ---------------------------------------------------------------------------
 # JSON extraction
 # ---------------------------------------------------------------------------
 _FENCE_RE = re.compile(r"^```(?:json)?\s*\n(.*?)\n```\s*$", re.DOTALL | re.MULTILINE)
@@ -118,8 +155,20 @@ def extract_json(text_blob: str) -> dict[str, Any]:
     start = blob.find("{")
     end = blob.rfind("}")
     if start == -1 or end == -1:
-        raise ValueError("No JSON object found in model output.")
-    return json.loads(blob[start : end + 1])
+        raise GeneratorRetryableError(
+            kind="json_decode",
+            message="No JSON object found in model output.",
+            raw_output=text_blob,
+        )
+    candidate = blob[start : end + 1]
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError as e:
+        raise GeneratorRetryableError(
+            kind="json_decode",
+            message=f"JSONDecodeError: {e.msg} at line {e.lineno} col {e.colno}.",
+            raw_output=candidate,
+        ) from e
 
 
 # ---------------------------------------------------------------------------
@@ -215,10 +264,23 @@ def _execute_readonly(engine, sql: str, *, timeout_s: int = MAX_QUERY_SECONDS) -
 # ---------------------------------------------------------------------------
 # Core generator
 # ---------------------------------------------------------------------------
+_JSON_ESCAPE_HINT = (
+    "Output valid JSON. Every backslash inside a string must be "
+    "doubled (write \\\\ for a literal backslash). Control characters "
+    "must use \\n, \\t, etc. Do not emit raw \\d, \\s, or other "
+    "non-JSON escape sequences."
+)
+
+
 def _format_retry_context(retry_context: dict[str, Any]) -> str:
     """Structured retry feedback block for the user message.
 
     Takes a dict with any of:
+      - ``error_kind``       — retryable-error kind: json_decode,
+                                json_schema, sql_execute.
+      - ``error_message``    — short error text from the previous attempt.
+      - ``raw_output``       — model's raw output that failed to parse
+                                (JSON errors only).
       - ``severity``         — sanity severity that fired (e.g., "high")
       - ``rule_flags``       — list of rule names that fired
       - ``verdict``          — one-sentence sanity verdict from Haiku
@@ -227,14 +289,44 @@ def _format_retry_context(retry_context: dict[str, Any]) -> str:
       - ``previous_sql``     — the SQL the previous attempt emitted
 
     Emits a compact text block. Generator reads this as signal that the
-    previous attempt failed sanity and should be corrected — not as
+    previous attempt failed and should be corrected — not as
     negotiation or policy.
     """
-    lines = [
-        "A previous attempt at this sub-question failed sanity checks. "
-        "Revise the SQL to address the issues below. Do not repeat the "
-        "same query."
-    ]
+    kind = retry_context.get("error_kind")
+    if kind == "sql_execute":
+        headline = (
+            "A previous attempt at this sub-question produced SQL the "
+            "database refused to execute. Revise the SQL to fix the "
+            "error below. Do not repeat the same query."
+        )
+    elif kind in {"json_decode", "json_schema"}:
+        headline = (
+            "A previous attempt's output failed JSON validation. "
+            "Re-emit only the JSON object per the system prompt."
+        )
+    else:
+        headline = (
+            "A previous attempt at this sub-question failed sanity "
+            "checks. Revise the SQL to address the issues below. Do "
+            "not repeat the same query."
+        )
+    lines = [headline]
+
+    if kind:
+        lines.append(f"Error kind: {kind}")
+    if (err := retry_context.get("error_message")):
+        lines.append(f"Error message: {err}")
+    if kind == "json_decode":
+        lines.append(_JSON_ESCAPE_HINT)
+    if (raw := retry_context.get("raw_output")):
+        snippet = raw.strip()
+        if len(snippet) > 800:
+            snippet = snippet[:800] + " ...[truncated]"
+        lines.append(
+            "Previous raw output (do not repeat the same parse "
+            "failure):\n```\n" + snippet + "\n```"
+        )
+
     if (sev := retry_context.get("severity")):
         lines.append(f"Severity: {sev}")
     if (flags := retry_context.get("rule_flags")):
@@ -337,17 +429,33 @@ def generate_and_execute(
         raise RuntimeError(f"Unexpected stop_reason: {response.stop_reason}")
 
     final_text = "\n".join(b.text for b in response.content if b.type == "text").strip()
-    raw = extract_json(final_text)
+    raw = extract_json(final_text)  # may raise GeneratorRetryableError(json_decode)
     try:
         parsed = GeneratorOutput.model_validate(raw)
     except ValidationError as e:
-        raise RuntimeError(f"Generator JSON failed validation: {e}\nRaw: {raw}")
+        raise GeneratorRetryableError(
+            kind="json_schema",
+            message=f"Generator JSON failed schema validation: {e}",
+            raw_output=final_text,
+        ) from e
 
     validate_notes(parsed.notes)
     final_sql, limit_injected = validate_and_prepare_sql(parsed.sql, row_cap=row_cap)
 
     t0 = time.time()
-    df = _execute_readonly(engine, final_sql)
+    try:
+        df = _execute_readonly(engine, final_sql)
+    except SQLAlchemyError as e:
+        # DB refused to execute — surface the server's message back to
+        # the model verbatim so the next attempt can target the exact
+        # dialect issue (e.g., "DISTINCT is not implemented for window
+        # functions", "invalid UNION/INTERSECT/EXCEPT ORDER BY clause").
+        db_msg = str(getattr(e, "orig", e)) or str(e)
+        raise GeneratorRetryableError(
+            kind="sql_execute",
+            message=db_msg,
+            previous_sql=final_sql,
+        ) from e
     elapsed_ms = int((time.time() - t0) * 1000)
 
     return GenerationResult(

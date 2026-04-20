@@ -1,0 +1,592 @@
+{
+  "meta": {
+    "started_at": "2026-04-20T22:44:41.884399+00:00",
+    "finished_at": "2026-04-20T22:47:05.097440+00:00",
+    "wall_time_s": 143.21,
+    "n_trials": 3,
+    "n_questions": 1,
+    "question_ids": [
+      12
+    ],
+    "questions_path": "eval/questions.jsonl",
+    "max_retries": 2,
+    "git_sha": "db0535f547889dea145b86dfe2b2412a77186b8a",
+    "schema_version": 1
+  },
+  "questions": [
+    {
+      "id": 12,
+      "category": "tricky",
+      "question": "What is revenue by payment method, and does it differ by calculation approach?",
+      "expected_confidence": [
+        "HIGH",
+        "MEDIUM"
+      ],
+      "expected_scrutiny_trigger": "cross_validation",
+      "expected_answer_hint": null,
+      "notes": "Question explicitly asks for reconciliation, so the planner MUST fan out. Good stress on cross-val handling of multi-row shapes.",
+      "trials": [
+        {
+          "plan": {
+            "answerable": true,
+            "unanswerable_reason": null,
+            "n_sub_questions": 2,
+            "reconciliation_step": true,
+            "full": {
+              "restated_question": "Break down total revenue by payment method (credit_card, boleto, voucher, debit_card), and cross-validate the totals using two revenue definitions (payment-based vs. item+freight-based) to see if results differ.",
+              "answerable": true,
+              "unanswerable_reason": null,
+              "sub_questions": [
+                {
+                  "id": 1,
+                  "question": "For each payment_type (excluding 'not_defined'), compute total revenue as SUM(payment_value) grouped by payment_type, joining to olist_orders_dataset to exclude canceled and unavailable orders.",
+                  "canonical_metric": "revenue",
+                  "tables_likely": [
+                    "olist_order_payments_dataset",
+                    "olist_orders_dataset"
+                  ],
+                  "filters_implied": [
+                    "payment_type <> 'not_defined'",
+                    "order_status NOT IN ('canceled', 'unavailable')"
+                  ],
+                  "aggregation_heavy": true,
+                  "cross_validation_candidate": true
+                },
+                {
+                  "id": 2,
+                  "question": "For each payment_type (excluding 'not_defined'), compute total revenue as SUM(order_items.price) + SUM(order_items.freight_value) for the orders associated with each payment method, joining olist_order_payments_dataset to olist_order_items_dataset via order_id and olist_orders_dataset to apply status filter.",
+                  "canonical_metric": "revenue",
+                  "tables_likely": [
+                    "olist_order_payments_dataset",
+                    "olist_order_items_dataset",
+                    "olist_orders_dataset"
+                  ],
+                  "filters_implied": [
+                    "payment_type <> 'not_defined'",
+                    "order_status NOT IN ('canceled', 'unavailable')",
+                    "aggregate items per order first, then attribute to payment method to avoid double-counting multi-payment orders"
+                  ],
+                  "aggregation_heavy": true,
+                  "cross_validation_candidate": true
+                }
+              ],
+              "reconciliation_step": "Per-payment-method totals from sub-question 1 (SUM of payment_value) and sub-question 2 (SUM of price + freight_value attributed via order) should agree within ~0.02% for each method. Larger deltas \u2014 especially on voucher or installment-heavy methods like credit_card \u2014 are expected to be slightly higher due to rounding, but any delta >0.5% per method warrants investigation. Note that sub-question 2 attributes item revenue to a payment method by joining on order_id; orders with mixed payment methods will distribute all item revenue to each method used, so the sum across methods in sub-question 2 may exceed the grand total if not handled carefully (use DISTINCT order attribution or weighted split logic)."
+            }
+          },
+          "sub_questions": [
+            {
+              "sub_question_id": 1,
+              "question": "For each payment_type (excluding 'not_defined'), compute total revenue as SUM(payment_value) grouped by payment_type, joining to olist_orders_dataset to exclude canceled and unavailable orders.",
+              "canonical_metric": "revenue",
+              "sql": "SELECT p.payment_type, SUM(p.payment_value) AS total_revenue FROM olist_order_payments_dataset AS p JOIN olist_orders_dataset AS o ON o.order_id = p.order_id WHERE p.payment_type <> 'not_defined' AND NOT o.order_status IN ('canceled', 'unavailable') GROUP BY p.payment_type ORDER BY total_revenue DESC",
+              "notes": "Used revenue_from_payments definition; excluded payment_type='not_defined' and canceled/unavailable orders; grouped by payment_type for breakdown.",
+              "row_count": 4,
+              "sanity": {
+                "passed": true,
+                "severity": "low",
+                "flags": [],
+                "llm_severity": "low",
+                "llm_verdict": "Four-row payment-type breakdown with total revenue ~$15.7M is plausible for Olist's full activity period; credit card dominance (78% of revenue) and the absence of 'not_defined' rows align with the filters specified.",
+                "llm_concerns": []
+              },
+              "retry_count": 0,
+              "retries_exhausted": false
+            },
+            {
+              "sub_question_id": 2,
+              "question": "For each payment_type (excluding 'not_defined'), compute total revenue as SUM(order_items.price) + SUM(order_items.freight_value) for the orders associated with each payment method, joining olist_order_payments_dataset to olist_order_items_dataset via order_id and olist_orders_dataset to apply status filter.",
+              "canonical_metric": "revenue",
+              "sql": "WITH order_item_revenue AS (SELECT oi.order_id, SUM(oi.price) + SUM(oi.freight_value) AS order_revenue FROM olist_order_items_dataset AS oi GROUP BY oi.order_id), order_payment_type AS (SELECT DISTINCT ON (p.order_id) p.order_id, p.payment_type FROM olist_order_payments_dataset AS p WHERE p.payment_type <> 'not_defined' ORDER BY p.order_id, p.payment_sequential) SELECT opt.payment_type, SUM(oir.order_revenue) AS total_revenue FROM order_payment_type AS opt JOIN order_item_revenue AS oir ON oir.order_id = opt.order_id JOIN olist_orders_dataset AS o ON o.order_id = opt.order_id WHERE NOT o.order_status IN ('canceled', 'unavailable') GROUP BY opt.payment_type ORDER BY total_revenue DESC",
+              "notes": "Used revenue_from_items_and_freight definition; aggregated item revenue per order first to avoid double-counting multi-payment orders, then attributed each order to its primary payment type.",
+              "row_count": 4,
+              "sanity": {
+                "passed": true,
+                "severity": "low",
+                "flags": [],
+                "llm_severity": "low",
+                "llm_verdict": "Four payment types with total revenue of ~$15.7M, distributed 80% to credit_card and 18% to boleto, aligns with expected e-commerce payment method prevalence and Olist's overall quarterly revenue magnitude.",
+                "llm_concerns": []
+              },
+              "retry_count": 0,
+              "retries_exhausted": false
+            }
+          ],
+          "reconciliation": {
+            "skipped": false,
+            "passed": false,
+            "severity": "high",
+            "delta_pct": 0.7365825635219196,
+            "note": "The voucher revenue differs sharply between definitions (payments: $349.9K vs items+freight: $161.5K, a 53.8% gap), suggesting the items+freight path's primary-payment-type attribution loses voucher revenue from multi-payment orders that payments captures in full, while credit_card and boleto remain tightly aligned (within 1.5%), indicating the attribution method systematically undercounts voucher but not other methods.",
+            "reason": null,
+            "shape": "multi_row",
+            "key_alignment": "ok",
+            "mean_delta_pct": 0.18806897854016005,
+            "max_delta_pct": 0.7365825635219196,
+            "missing_keys_a": [],
+            "missing_keys_b": []
+          },
+          "confidence": {
+            "label": "LOW",
+            "reason": "Reconciliation mismatch at severity=high (delta=0.7365825635219196); per design we do not auto-retry on reconciliation failure, so the answer is surfaced with LOW confidence.",
+            "derivation": {
+              "planner_answerable": true,
+              "max_retries": 2,
+              "sub_count": 2,
+              "sanity_severities": [
+                "low",
+                "low"
+              ],
+              "retry_counts": [
+                0,
+                0
+              ],
+              "retries_exhausted_any": false,
+              "recon_skipped": false,
+              "recon_passed": false,
+              "recon_severity": "high"
+            }
+          },
+          "report": {
+            "answer": "Revenue by payment method from the **payments-based definition** (sub-question 1):\n\n| Payment Type | Total Revenue |\n|---|---|\n| credit_card | $12,350,042.56 |\n| boleto | $2,826,802.30 |\n| voucher | $349,874.40 |\n| debit_card | $212,417.75 |\n\n**Yes, the calculation approach matters \u2014 materially for voucher.** Credit card and boleto agree closely across both methods (within ~1.5%), but voucher shows a 53.8% gap: $349,874 under the payments definition vs. $161,529 under the items+freight definition. This is not a data error \u2014 it reflects an attribution problem: the items+freight path assigns each order to its *primary* payment type, so voucher revenue from mixed-payment orders (e.g., part-voucher, part-credit-card) is silently reassigned to the dominant method. The payments definition captures all voucher row values directly, so it is the more reliable figure for voucher revenue.\n\nConfidence: LOW",
+            "methodology": "I decomposed this into two sub-questions, each computing revenue by payment type using a different definition, so the results could be cross-validated:\n\n1. **Sub-question 1 (payments-based):** Summed `payment_value` from `olist_order_payments_dataset` grouped by `payment_type`, joined to `olist_orders_dataset` to apply the order-status filter. This captures every payment row \u2014 including partial-voucher rows in multi-payment orders \u2014 at face value.\n\n2. **Sub-question 2 (items+freight-based):** Aggregated item revenue (`price + freight_value`) per order in a CTE, then attributed each order to its *primary* payment type (lowest `payment_sequential` among non-`not_defined` rows via `DISTINCT ON`). This avoids double-counting across multi-payment orders but by design assigns 100% of an order's item revenue to one payment type, losing signal for secondary payment methods like vouchers.\n\nBoth paths excluded `payment_type = 'not_defined'` and orders with status `canceled` or `unavailable`. The plan's reconciliation step anticipated that voucher and credit-card could diverge due to mixed-payment-order attribution, and the results confirm this concern.",
+            "verification": "\u2713 Sub-question 1 (payments-based) sanity: clean \u2014 4 rows, total ~$15.7M, credit card at ~78% of revenue; no flags raised. First attempt succeeded (retry_count=0).\n\n\u2713 Sub-question 2 (items+freight-based) sanity: clean \u2014 4 rows, total ~$15.7M, credit card at ~80%; no flags raised. First attempt succeeded (retry_count=0).\n\n\u26a0 Cross-validation: **Failed at severity=high.** The two definitions agree well for credit_card (payments: $12,350,043 vs. items+freight: $12,534,806, ~1.5% delta) and boleto (payments: $2,826,802 vs. items+freight: $2,826,476, ~0.01% delta), but diverge sharply on voucher: payments captures $349,874 while items+freight attributes only $161,529 \u2014 a **53.8% gap**. The reconciliation note confirms this is a systematic artifact of the primary-payment-type attribution logic in sub-question 2, not a query error. The overall delta across all methods is 0.74%, triggering a high-severity reconciliation failure. Per pipeline design, reconciliation failures are not auto-retried; the answer is surfaced at LOW confidence.",
+            "caveats": "\u26a0 Confidence is LOW because the reconciliation check failed at high severity \u2014 the two calculation approaches produce materially different voucher figures. Use the payments-based total ($349,874) for voucher if you need to capture all voucher value; understand that this includes cases where a voucher was only a partial payment on an order.\n\n\u26a0 The items+freight path uses primary-payment-type attribution (lowest `payment_sequential`): for mixed-payment orders, 100% of item+freight revenue is assigned to the primary method and zero to secondary methods (e.g., vouchers). This means the items+freight breakdown by payment type is not directly comparable to the payments breakdown for any method that frequently appears as a secondary payment.\n\n\u26a0 Canceled and unavailable orders are excluded from both definitions.\n\n\u26a0 `payment_type = 'not_defined'` rows are excluded from both definitions."
+          },
+          "usage": {
+            "planner": {
+              "input_tokens": 22,
+              "cache_creation_input_tokens": 13303,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 660,
+              "stop_reason": "end_turn"
+            },
+            "sql_generator": [
+              {
+                "input_tokens": 193,
+                "cache_creation_input_tokens": 13351,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 149,
+                "stop_reason": "end_turn"
+              },
+              {
+                "input_tokens": 264,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 13351,
+                "output_tokens": 362,
+                "stop_reason": "end_turn"
+              }
+            ],
+            "sanity": [
+              {
+                "input_tokens": 2686,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 87
+              },
+              {
+                "input_tokens": 2766,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 82
+              }
+            ],
+            "reconciliation": {
+              "input_tokens": 2956,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 115
+            },
+            "presenter": {
+              "input_tokens": 2278,
+              "cache_creation_input_tokens": 3411,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 1115,
+              "stop_reason": "end_turn"
+            }
+          },
+          "cost": {
+            "planner": 0.059852249999999996,
+            "sql_generator": 0.06310755,
+            "sanity": 0.0062970000000000005,
+            "reconciliation": 0.003531,
+            "presenter": 0.03635025,
+            "total": 0.16913804999999998
+          },
+          "ok": true,
+          "error": null,
+          "wall_time_s": 55.039,
+          "trial_idx": 0
+        },
+        {
+          "plan": {
+            "answerable": true,
+            "unanswerable_reason": null,
+            "n_sub_questions": 2,
+            "reconciliation_step": true,
+            "full": {
+              "restated_question": "Break down total revenue by payment method (credit_card, boleto, voucher, debit_card), and cross-validate the totals using two calculation approaches: (1) SUM of payment_value from the payments table, and (2) SUM of price + freight_value from the order items table, reconciled per payment method.",
+              "answerable": true,
+              "unanswerable_reason": null,
+              "sub_questions": [
+                {
+                  "id": 1,
+                  "question": "For each payment_type, compute total revenue as SUM(payment_value), excluding payment_type = 'not_defined' and canceled/unavailable orders. Also report COUNT(DISTINCT order_id) per payment type.",
+                  "canonical_metric": "revenue",
+                  "tables_likely": [
+                    "olist_orders_dataset",
+                    "olist_order_payments_dataset"
+                  ],
+                  "filters_implied": [
+                    "payment_type NOT IN ('not_defined')",
+                    "order_status NOT IN ('canceled', 'unavailable')"
+                  ],
+                  "aggregation_heavy": true,
+                  "cross_validation_candidate": true
+                },
+                {
+                  "id": 2,
+                  "question": "For each payment_type associated with an order, compute total revenue as SUM(order_items.price) + SUM(order_items.freight_value), excluding canceled/unavailable orders, grouped by the payment_type of those orders. Note: for orders with mixed payment methods, allocate the full item+freight total to the primary payment method (payment_sequential = 1).",
+                  "canonical_metric": "revenue",
+                  "tables_likely": [
+                    "olist_orders_dataset",
+                    "olist_order_items_dataset",
+                    "olist_order_payments_dataset"
+                  ],
+                  "filters_implied": [
+                    "payment_type NOT IN ('not_defined')",
+                    "order_status NOT IN ('canceled', 'unavailable')",
+                    "payment_sequential = 1 to identify the primary payment method per order"
+                  ],
+                  "aggregation_heavy": true,
+                  "cross_validation_candidate": true
+                }
+              ],
+              "reconciliation_step": "Compare the per-payment-method revenue totals from sub-question 1 (payment_value-based) and sub-question 2 (items+freight-based). At the dataset grand-total level, the two approaches should agree within ~0.02%. Per-method deltas may be slightly larger due to mixed-method orders (where one method in sub-question 1 captures partial payment_value, while sub-question 2 assigns the full order value to the primary method). Any per-method delta beyond ~1\u20132% for mixed-method types (e.g., voucher combined with credit_card) is expected and should be called out as a methodological difference rather than a data error."
+            }
+          },
+          "sub_questions": [
+            {
+              "sub_question_id": 1,
+              "question": "For each payment_type, compute total revenue as SUM(payment_value), excluding payment_type = 'not_defined' and canceled/unavailable orders. Also report COUNT(DISTINCT order_id) per payment type.",
+              "canonical_metric": "revenue",
+              "sql": "SELECT p.payment_type, SUM(p.payment_value) AS total_revenue, COUNT(DISTINCT p.order_id) AS order_count FROM olist_order_payments_dataset AS p JOIN olist_orders_dataset AS o ON o.order_id = p.order_id WHERE NOT p.payment_type IN ('not_defined') AND NOT o.order_status IN ('canceled', 'unavailable') GROUP BY p.payment_type ORDER BY total_revenue DESC",
+              "notes": "Used revenue_from_payments definition; excluded payment_type='not_defined' and canceled/unavailable orders; COUNT(DISTINCT order_id) avoids double-counting orders with multiple payment rows.",
+              "row_count": 4,
+              "sanity": {
+                "passed": true,
+                "severity": "low",
+                "flags": [],
+                "llm_severity": "low",
+                "llm_verdict": "Four-row payment-type breakdown with total revenue of ~$15.7M and ~100K orders aligns with Olist's expected scale; credit card dominance and the distribution across payment methods is plausible for the e-commerce platform.",
+                "llm_concerns": []
+              },
+              "retry_count": 0,
+              "retries_exhausted": false
+            },
+            {
+              "sub_question_id": 2,
+              "question": "For each payment_type associated with an order, compute total revenue as SUM(order_items.price) + SUM(order_items.freight_value), excluding canceled/unavailable orders, grouped by the payment_type of those orders. Note: for orders with mixed payment methods, allocate the full item+freight total to the primary payment method (payment_sequential = 1).",
+              "canonical_metric": "revenue",
+              "sql": "WITH primary_payment AS (SELECT order_id, payment_type FROM olist_order_payments_dataset WHERE payment_sequential = 1 AND NOT payment_type IN ('not_defined')), order_item_revenue AS (SELECT oi.order_id, SUM(oi.price) + SUM(oi.freight_value) AS order_revenue FROM olist_order_items_dataset AS oi JOIN olist_orders_dataset AS o ON o.order_id = oi.order_id WHERE NOT o.order_status IN ('canceled', 'unavailable') GROUP BY oi.order_id) SELECT pp.payment_type, SUM(ir.order_revenue) AS total_revenue, COUNT(DISTINCT ir.order_id) AS order_count FROM order_item_revenue AS ir JOIN primary_payment AS pp ON pp.order_id = ir.order_id GROUP BY pp.payment_type ORDER BY total_revenue DESC",
+              "notes": "Used revenue_from_items_and_freight definition; allocated full item+freight revenue to payment_sequential=1 (primary method) per order, excluding canceled/unavailable orders and payment_type='not_defined'.",
+              "row_count": 4,
+              "sanity": {
+                "passed": true,
+                "severity": "low",
+                "flags": [],
+                "llm_severity": "low",
+                "llm_verdict": "Four payment types with revenue totaling ~$15.7M and order counts summing to ~98K are consistent with Olist's scale, distribution, and the specified filters; credit card dominance (80% of revenue, 77% of orders) aligns with typical e-commerce payment patterns.",
+                "llm_concerns": []
+              },
+              "retry_count": 0,
+              "retries_exhausted": false
+            }
+          ],
+          "reconciliation": {
+            "skipped": false,
+            "passed": false,
+            "severity": "high",
+            "delta_pct": null,
+            "note": null,
+            "reason": "Sibling sub_question_id=1: Multiple numeric columns (['total_revenue', 'order_count']); key/metric inference is ambiguous. Expected exactly one metric column.",
+            "shape": "invalid",
+            "key_alignment": "n/a",
+            "mean_delta_pct": null,
+            "max_delta_pct": null,
+            "missing_keys_a": [],
+            "missing_keys_b": []
+          },
+          "confidence": {
+            "label": "LOW",
+            "reason": "Reconciliation mismatch at severity=high (delta=None); per design we do not auto-retry on reconciliation failure, so the answer is surfaced with LOW confidence.",
+            "derivation": {
+              "planner_answerable": true,
+              "max_retries": 2,
+              "sub_count": 2,
+              "sanity_severities": [
+                "low",
+                "low"
+              ],
+              "retry_counts": [
+                0,
+                0
+              ],
+              "retries_exhausted_any": false,
+              "recon_skipped": false,
+              "recon_passed": false,
+              "recon_severity": "high"
+            }
+          },
+          "report": {
+            "answer": "Revenue by payment method (payment_value approach, sub-question 1):\n\n| Payment Type | Total Revenue | Order Count |\n|---|---|---|\n| credit_card | $12,350,042.56 | 75,618 |\n| boleto | $2,826,802.30 | 19,539 |\n| voucher | $349,874.40 | 3,745 |\n| debit_card | $212,417.75 | 1,515 |\n\nRevenue by payment method (items+freight approach, sub-question 2):\n\n| Payment Type | Total Revenue | Order Count |\n|---|---|---|\n| credit_card | $12,528,669.92 | 75,585 |\n| boleto | $2,826,381.82 | 19,534 |\n| debit_card | $205,507.88 | 1,465 |\n| voucher | $161,528.99 | 1,535 |\n\nThe two approaches agree closely for **credit_card** and **boleto**, but diverge significantly for **voucher** ($349,874 vs $161,529 \u2014 a ~117% gap) and **debit_card** ($212,418 vs $205,508 \u2014 a ~3.4% gap). Both sibling values are reported here because the per-method deltas are too large to collapse into a single figure.\n\nConfidence: LOW",
+            "methodology": "I decomposed this into two sub-questions, each computing revenue by payment type using a different canonical definition, enabling cross-validation:\n\n1. **Sub-question 1 (payment_value-based):** Summed `payment_value` from the payments table, grouped by `payment_type`. Each payment row contributes its recorded payment value \u2014 so an order split across multiple methods contributes to each method's revenue independently.\n2. **Sub-question 2 (items+freight-based):** Summed `price + freight_value` from the order items table, then allocated the full order-level revenue to the *primary* payment method (`payment_sequential = 1`) per order. This means mixed-method orders are attributed entirely to the first-listed method.\n\nBoth sub-questions excluded `payment_type = 'not_defined'` and orders with status `canceled` or `unavailable`. The structural difference \u2014 partial payment capture in sub-question 1 vs. full-order allocation in sub-question 2 \u2014 is the methodological root of the per-method divergence, particularly for voucher, which is frequently used as a supplementary payment alongside credit_card.",
+            "verification": "\u2713 Sub-question 1 (payment_value): sanity clean \u2014 4 rows, total ~$15.7M across ~100K orders; credit card dominance and distribution are plausible for Olist's scale.\n\u2713 Sub-question 2 (items+freight): sanity clean \u2014 4 rows, total ~$15.7M across ~98K orders; credit card at ~80% of revenue aligns with expected e-commerce patterns.\n\u26a0 Cross-validation: The automated reconciliation step **failed** with severity=high. The reconciler flagged that sub-question 1 returned multiple numeric columns (`total_revenue`, `order_count`), making automated metric comparison ambiguous \u2014 it could not compute a single scalar delta. No delta_pct was produced. This is a pipeline infrastructure limitation, not a data error; the numeric values themselves can be compared manually (see the answer section). Notably, the voucher method shows a ~117% gap between the two approaches, which is consistent with the planner's expectation that mixed-method orders (e.g., voucher + credit_card) will cause large per-method divergence under the two definitions.\nNo retries were required for either sub-question (retry_count = 0 for both).",
+            "caveats": "\u26a0 Confidence is LOW because the automated reconciliation could not produce a delta comparison due to multi-column output ambiguity; the pipeline surfaces the result rather than declining, but the user should interpret per-method figures with awareness of the methodological differences below.\n\u26a0 **Voucher divergence is expected and methodological:** Vouchers are frequently used as partial payment alongside credit_card. Sub-question 1 captures only the voucher-portion of `payment_value` for those mixed orders; sub-question 2 assigns the *entire* order's item+freight revenue to whichever method has `payment_sequential = 1`. This is the primary driver of the $349,874 vs $161,529 voucher discrepancy.\n\u26a0 Canceled and unavailable orders are excluded from both definitions.\n\u26a0 Orders with `payment_type = 'not_defined'` are excluded from both definitions.\n\u26a0 Sub-question 2 allocates full order-level revenue to the primary payment method (`payment_sequential = 1`); for orders with secondary or tertiary payment methods, those methods receive no revenue allocation under this definition."
+          },
+          "usage": {
+            "planner": {
+              "input_tokens": 22,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 13303,
+              "output_tokens": 681,
+              "stop_reason": "end_turn"
+            },
+            "sql_generator": [
+              {
+                "input_tokens": 195,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 13351,
+                "output_tokens": 174,
+                "stop_reason": "end_turn"
+              },
+              {
+                "input_tokens": 260,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 13351,
+                "output_tokens": 346,
+                "stop_reason": "end_turn"
+              }
+            ],
+            "sanity": [
+              {
+                "input_tokens": 2821,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 84
+              },
+              {
+                "input_tokens": 2893,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 95
+              }
+            ],
+            "reconciliation": {},
+            "presenter": {
+              "input_tokens": 2492,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 3411,
+              "output_tokens": 1203,
+              "stop_reason": "end_turn"
+            }
+          },
+          "cost": {
+            "planner": 0.0142719,
+            "sql_generator": 0.0171756,
+            "sanity": 0.006609,
+            "reconciliation": 0.0,
+            "presenter": 0.0265443,
+            "total": 0.0646008
+          },
+          "ok": true,
+          "error": null,
+          "wall_time_s": 49.593,
+          "trial_idx": 1
+        },
+        {
+          "plan": {
+            "answerable": true,
+            "unanswerable_reason": null,
+            "n_sub_questions": 2,
+            "reconciliation_step": true,
+            "full": {
+              "restated_question": "Break down total revenue by payment method (credit_card, boleto, voucher, debit_card), and cross-validate the totals using two calculation approaches: payment-table-based and items-table-based.",
+              "answerable": true,
+              "unanswerable_reason": null,
+              "sub_questions": [
+                {
+                  "id": 1,
+                  "question": "For each payment_type, compute total revenue as SUM(payment_value) grouped by payment_type, excluding orders with payment_type = 'not_defined' and excluding canceled/unavailable orders.",
+                  "canonical_metric": "revenue",
+                  "tables_likely": [
+                    "olist_orders_dataset",
+                    "olist_order_payments_dataset"
+                  ],
+                  "filters_implied": [
+                    "payment_type <> 'not_defined'",
+                    "order_status NOT IN ('canceled', 'unavailable')"
+                  ],
+                  "aggregation_heavy": true,
+                  "cross_validation_candidate": true
+                },
+                {
+                  "id": 2,
+                  "question": "Compute total revenue across all orders as SUM(price) + SUM(freight_value) from the order items table, excluding canceled/unavailable orders, to serve as the overall cross-check denominator against sub-question 1's grand total.",
+                  "canonical_metric": "revenue",
+                  "tables_likely": [
+                    "olist_orders_dataset",
+                    "olist_order_items_dataset"
+                  ],
+                  "filters_implied": [
+                    "order_status NOT IN ('canceled', 'unavailable')"
+                  ],
+                  "aggregation_heavy": true,
+                  "cross_validation_candidate": true
+                }
+              ],
+              "reconciliation_step": "The grand total of SUM(payment_value) across all non-'not_defined' payment types from sub-question 1 should match the grand total of SUM(price) + SUM(freight_value) from sub-question 2 within ~0.02%. A delta larger than 0.5% indicates a SQL error (e.g., accidental duplication from a bad join) or an unexpected data anomaly. The per-payment-method breakdown from sub-question 1 cannot be directly replicated from the items table (no payment method on the items table), so only the grand totals are reconcilable between the two approaches."
+            }
+          },
+          "sub_questions": [
+            {
+              "sub_question_id": 1,
+              "question": "For each payment_type, compute total revenue as SUM(payment_value) grouped by payment_type, excluding orders with payment_type = 'not_defined' and excluding canceled/unavailable orders.",
+              "canonical_metric": "revenue",
+              "sql": "SELECT p.payment_type, SUM(p.payment_value) AS total_revenue FROM olist_order_payments_dataset AS p JOIN olist_orders_dataset AS o ON o.order_id = p.order_id WHERE p.payment_type <> 'not_defined' AND NOT o.order_status IN ('canceled', 'unavailable') GROUP BY p.payment_type ORDER BY total_revenue DESC",
+              "notes": "Used revenue_from_payments definition; excluded payment_type='not_defined' and canceled/unavailable orders; grouped by payment_type for breakdown.",
+              "row_count": 4,
+              "sanity": {
+                "passed": true,
+                "severity": "low",
+                "flags": [],
+                "llm_severity": "low",
+                "llm_verdict": "Four-row payment-type breakdown with total revenue ~$15.74M is plausible for the Olist dataset over its full active period, with credit_card dominance (78.5% of total) consistent with e-commerce norms.",
+                "llm_concerns": []
+              },
+              "retry_count": 0,
+              "retries_exhausted": false
+            },
+            {
+              "sub_question_id": 2,
+              "question": "Compute total revenue across all orders as SUM(price) + SUM(freight_value) from the order items table, excluding canceled/unavailable orders, to serve as the overall cross-check denominator against sub-question 1's grand total.",
+              "canonical_metric": "revenue",
+              "sql": "SELECT SUM(oi.price) + SUM(oi.freight_value) AS total_revenue_items_based FROM olist_order_items_dataset AS oi JOIN olist_orders_dataset AS o ON o.order_id = oi.order_id WHERE NOT o.order_status IN ('canceled', 'unavailable')",
+              "notes": "Used revenue_from_items_and_freight definition (price + freight_value); excluded canceled/unavailable orders via join to orders table.",
+              "row_count": 1,
+              "sanity": {
+                "passed": true,
+                "severity": "low",
+                "flags": [],
+                "llm_severity": "low",
+                "llm_verdict": "Single-row aggregate of ~$15.7M is plausible for total Olist revenue across the entire dataset period (2016\u20132018), consistent with quarterly ballpark priors and appropriate for a cross-validation denominator.",
+                "llm_concerns": []
+              },
+              "retry_count": 0,
+              "retries_exhausted": false
+            }
+          ],
+          "reconciliation": {
+            "skipped": false,
+            "passed": false,
+            "severity": "high",
+            "delta_pct": null,
+            "note": null,
+            "reason": "Sibling shape mismatch: some return a single scalar, others return multi-row tables; reconciliation is invalid.",
+            "shape": "invalid",
+            "key_alignment": "n/a",
+            "mean_delta_pct": null,
+            "max_delta_pct": null,
+            "missing_keys_a": [],
+            "missing_keys_b": []
+          },
+          "confidence": {
+            "label": "LOW",
+            "reason": "Reconciliation mismatch at severity=high (delta=None); per design we do not auto-retry on reconciliation failure, so the answer is surfaced with LOW confidence.",
+            "derivation": {
+              "planner_answerable": true,
+              "max_retries": 2,
+              "sub_count": 2,
+              "sanity_severities": [
+                "low",
+                "low"
+              ],
+              "retry_counts": [
+                0,
+                0
+              ],
+              "retries_exhausted_any": false,
+              "recon_skipped": false,
+              "recon_passed": false,
+              "recon_severity": "high"
+            }
+          },
+          "report": {
+            "answer": "Revenue by payment method (payments-table approach, excluding canceled/unavailable orders and 'not_defined' payment types):\n\n- **Credit card:** $12,350,042.56\n- **Boleto:** $2,826,802.30\n- **Voucher:** $349,874.40\n- **Debit card:** $212,417.75\n\n**Grand total (payments approach):** $15,739,136.01\n\nThe items-table cross-check yields **$15,735,527.03** \u2014 a difference of ~$3,609 (~0.02%) from the payments grand total. The two approaches are numerically very close, suggesting they agree on overall revenue. However, the pipeline's automated reconciliation layer flagged a **shape mismatch** (one path returns a scalar, the other returns a multi-row table), so the cross-validation was marked invalid at severity=high and the result is surfaced at LOW confidence.\n\nConfidence: LOW",
+            "methodology": "I decomposed this into two sub-questions to both answer the breakdown question and cross-validate the grand total:\n1. **Sub-question 1 (payments breakdown):** Summed `payment_value` from the payments table, grouped by `payment_type`, excluding `payment_type = 'not_defined'` and canceled/unavailable orders. This is the primary result that answers the per-method breakdown.\n2. **Sub-question 2 (items-based cross-check):** Summed `price + freight_value` from the order-items table, excluding canceled/unavailable orders, to produce a single grand-total denominator for comparison against sub-question 1's aggregate.\n\nPer the plan, only grand totals are reconcilable between the two approaches \u2014 payment method attribution does not exist on the items table, so the per-method split is available only from sub-question 1. The automated reconciliation layer attempted to compare the two sibling outputs but failed because one result is a scalar and the other is a multi-row table, making the shape incompatible for automated comparison.",
+            "verification": "\u2713 Sub-question 1 (payments breakdown) sanity: clean \u2014 4 rows, grand total ~$15.74M is plausible for the full Olist active period; credit card dominance at ~78.5% of total is consistent with e-commerce norms.\n\u2713 Sub-question 2 (items-based total) sanity: clean \u2014 single-row aggregate of ~$15.74M is plausible and appropriate as a cross-validation denominator.\n\u26a0 Cross-validation: Reconciliation failed with severity=high due to a shape mismatch \u2014 the reconciler received one scalar result and one multi-row result and could not compute a delta automatically (delta_pct=null). Note that a manual comparison of the sub-question 1 grand total (~$15,739,136) against sub-question 2 ($15,735,527.03) shows a difference of roughly $3,609 (~0.02%), which is within the plan's stated tolerance of ~0.02%. However, because the automated layer flagged the shape as invalid rather than computing this delta, the confidence is set to LOW per pipeline design.\nNo retries were required for either sub-question (retry_count=0 for both).",
+            "caveats": "\u26a0 Confidence is LOW because the automated reconciliation layer could not compare the two sibling outputs (shape mismatch between scalar and multi-row results); the pipeline does not auto-retry on reconciliation failure.\n\u26a0 Orders with `order_status IN ('canceled', 'unavailable')` are excluded from both sub-questions.\n\u26a0 Payments with `payment_type = 'not_defined'` are excluded from sub-question 1; this means the payments grand total may slightly undercount if any non-trivial revenue carries that type.\n\u26a0 The per-method breakdown (credit card, boleto, voucher, debit card) is derived solely from the payments table; there is no independent per-method cross-check available from the items table, which carries no payment-type attribute.\n\u26a0 The payments approach may count installment rows in full at the purchase timestamp rather than at individual installment dates, which is the standard treatment for this dataset."
+          },
+          "usage": {
+            "planner": {
+              "input_tokens": 22,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 13303,
+              "output_tokens": 568,
+              "stop_reason": "end_turn"
+            },
+            "sql_generator": [
+              {
+                "input_tokens": 191,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 13351,
+                "output_tokens": 149,
+                "stop_reason": "end_turn"
+              },
+              {
+                "input_tokens": 186,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 13351,
+                "output_tokens": 130,
+                "stop_reason": "end_turn"
+              }
+            ],
+            "sanity": [
+              {
+                "input_tokens": 2684,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 85
+              },
+              {
+                "input_tokens": 2563,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 81
+              }
+            ],
+            "reconciliation": {},
+            "presenter": {
+              "input_tokens": 1706,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 3411,
+              "output_tokens": 1011,
+              "stop_reason": "end_turn"
+            }
+          },
+          "cost": {
+            "planner": 0.0125769,
+            "sql_generator": 0.0133266,
+            "sanity": 0.006077000000000001,
+            "reconciliation": 0.0,
+            "presenter": 0.0213063,
+            "total": 0.0532868
+          },
+          "ok": true,
+          "error": null,
+          "wall_time_s": 38.58,
+          "trial_idx": 2
+        }
+      ]
+    }
+  ]
+}

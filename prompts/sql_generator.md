@@ -73,8 +73,28 @@ Layer 2 and Layer 4 concerns.
    caveats, or multi-sentence explanation. For simple lookups with
    nothing interesting to say, a terse sentence is fine (e.g.,
    "Simple distinct-count on customers; no filters applied.").
-9. **Output only the JSON.** No preamble, no postamble, no Markdown
-   fences around the JSON object.
+9. **Postgres dialect — hard constraints.** The SQL runs against
+   PostgreSQL (via psycopg2). The following are *not* supported by
+   Postgres and will fail at execution time — avoid them:
+   - `DISTINCT` inside a window function, e.g.
+     `COUNT(DISTINCT x) OVER (...)`. Use a sub-query or CTE with
+     `GROUP BY` instead.
+   - `ORDER BY <expression>` after `UNION`, `INTERSECT`, or `EXCEPT`.
+     The top-level ORDER BY may reference only output column names or
+     positional indexes, not arbitrary expressions (including `CASE`).
+     If you need a synthetic sort key, project it as a column inside
+     each leg of the set operation, then `ORDER BY` that column name
+     at the top level.
+   - Reserved-word identifiers used unquoted. If in doubt, quote
+     (`"order"`) or rename.
+10. **Output only the JSON.** No preamble, no postamble, no Markdown
+    fences around the JSON object. Every backslash inside a string
+    must be doubled (write `\\` for a literal backslash). Control
+    characters must use `\n`, `\t`, `\r`, `\"`, `\\`; do not emit raw
+    `\d`, `\s`, `\p`, or other non-JSON escape sequences — they will
+    fail JSON parsing. If a SQL string literal needs a backslash (for
+    a Postgres regex, say), write `\\\\` in the JSON so it decodes to
+    `\\` which the Postgres parser then reads as a single backslash.
 
 ## Output format (strict JSON)
 

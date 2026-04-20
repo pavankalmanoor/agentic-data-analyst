@@ -58,6 +58,7 @@ from agents.presenter import (
 )
 from agents.sql_generator import (
     GenerationResult,
+    GeneratorRetryableError,
     estimate_cost as estimate_generator_cost,
     generate_and_execute,
 )
@@ -158,7 +159,8 @@ def _build_retry_context(
     previous_generation: GenerationResult,
     previous_sanity: SanityResult,
 ) -> dict[str, Any]:
-    """Structured retry feedback for ``generate_and_execute``.
+    """Structured retry feedback for ``generate_and_execute`` when a
+    prior attempt failed sanity.
 
     We hand the generator the severity, rule flags, verdict, and the
     previous SQL — no negotiation or policy prose. See
@@ -178,6 +180,39 @@ def _build_retry_context(
             "data dictionary."
         ),
         "previous_sql": previous_generation.sql,
+    }
+
+
+def _build_retry_context_from_error(
+    err: GeneratorRetryableError,
+) -> dict[str, Any]:
+    """Structured retry feedback when a prior attempt raised a
+    retryable generator error (JSON parse, schema, or DB execute).
+
+    The orchestrator decides when to retry; this just formats the
+    failure into the same ``retry_context`` dict shape that
+    ``_format_retry_context`` consumes.
+    """
+    return {
+        "error_kind": err.kind,
+        "error_message": err.message,
+        "previous_sql": err.previous_sql,
+        "raw_output": err.raw_output,
+        "reason": {
+            "sql_execute": (
+                "Prior SQL parsed and validated but the database refused "
+                "it. Rewrite the query so Postgres accepts it."
+            ),
+            "json_decode": (
+                "Prior output was not valid JSON. Re-emit only the "
+                "JSON object per the system prompt, escaping "
+                "backslashes correctly."
+            ),
+            "json_schema": (
+                "Prior JSON did not match the required schema. Emit "
+                "exactly the two keys `sql` and `notes`."
+            ),
+        }.get(err.kind, "Prior attempt failed; retry."),
     }
 
 
@@ -213,13 +248,29 @@ def _run_sub_question(
                 f"{label}..."
             )
 
-        generation = generate_and_execute(
-            sub_question.model_dump(),
-            data_dictionary,
-            engine=engine,
-            client=client,
-            retry_context=retry_context,
-        )
+        try:
+            generation = generate_and_execute(
+                sub_question.model_dump(),
+                data_dictionary,
+                engine=engine,
+                client=client,
+                retry_context=retry_context,
+            )
+        except GeneratorRetryableError as err:
+            if verbose:
+                print(
+                    f"    [SQL] sub_question {sub_question.id}: "
+                    f"retryable failure ({err.kind}): {err.message[:120]}"
+                )
+            # No GenerationResult to attribute usage to on this attempt.
+            # Retry if budget remains; otherwise let the exception
+            # propagate so the caller (runner) records an ERROR trial.
+            if attempt == max_retries:
+                raise
+            retry_context = _build_retry_context_from_error(err)
+            retry_count = attempt + 1
+            continue
+
         metrics.generator_usages.append(dict(generation.usage))
 
         sanity = check_result(
