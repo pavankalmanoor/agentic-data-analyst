@@ -130,16 +130,39 @@ RULE_CASES = [
         ),
     ),
     RuleCase(
-        name="rate > 1 flagged high",
+        # Values outside [0, 1] AND [0, 100] are real bugs. A negative
+        # rate cannot be a mis-scaled percentage, so "high" is preserved.
+        name="rate outside [0,1] and [0,100] flagged high",
         sub_question={"id": 1, "question": "on-time rate",
                       "canonical_metric": "on_time_delivery_rate",
                       "tables_likely": [], "filters_implied": [],
                       "aggregation_heavy": True,
                       "cross_validation_candidate": False},
-        dataframe=pd.DataFrame({"on_time_rate": [0.4, 1.2, 0.6]}),
+        dataframe=pd.DataFrame({"on_time_rate": [0.4, -0.2, 0.6]}),
         expectation=lambda flags: any(
             f.rule == "rate_out_of_range" and f.severity == "high"
             for f in flags
+        ),
+    ),
+    RuleCase(
+        # A "rate" column scaled to [0, 100] is almost always the
+        # generator producing a percentage under a rate-style name
+        # (e.g. "on_time_delivery_rate" when the question asked for %).
+        # Record the ambiguity at low severity — do NOT block retry or
+        # confidence.
+        name="rate-named column scaled like percent is soft-flagged",
+        sub_question={"id": 1, "question": "on-time %",
+                      "canonical_metric": "on_time_delivery_rate",
+                      "tables_likely": [], "filters_implied": [],
+                      "aggregation_heavy": True,
+                      "cross_validation_candidate": False},
+        dataframe=pd.DataFrame({"on_time_delivery_rate": [91.888]}),
+        expectation=lambda flags: (
+            any(
+                f.rule == "rate_scaled_like_percent" and f.severity == "low"
+                for f in flags
+            )
+            and not any(f.severity == "high" for f in flags)
         ),
     ),
     RuleCase(

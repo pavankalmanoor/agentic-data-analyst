@@ -7,8 +7,11 @@ and presentation are NOT this layer's concern — they belong downstream.
 Two-stage design
 ----------------
 1. Python rules run first. They catch the obvious stuff (negative
-   revenue, empty results, rates outside [0,1], high null rates).
-   Rules are deterministic and free.
+   revenue, empty results, rates outside both [0,1] and [0,100],
+   high null rates). Rates outside [0,1] but inside [0,100] are
+   soft-flagged at low severity — almost always a percentage under
+   a rate-style column name, not a real bug. Rules are deterministic
+   and free.
 2. If no rule flag is severity="high", we ask Haiku: "does this look
    plausible for this sub-question?" Haiku returns a verdict and any
    judgment-level concerns the rules can't express.
@@ -129,20 +132,72 @@ def _rule_negative_monetary(df: pd.DataFrame) -> list[SanityFlag]:
 
 
 def _rule_rate_out_of_range(df: pd.DataFrame) -> list[SanityFlag]:
+    """Flag rate-named columns whose values are outside a plausible range.
+
+    A "rate" column is conventionally in [0, 1]. The generator, however,
+    sometimes emits rate columns already scaled to [0, 100] — either
+    because the question asked for a percentage (e.g. "what % of orders
+    were delivered on time?") or because the column is named like both
+    a rate and a percent (e.g. ``repeat_customer_rate_pct``).
+
+    Behavior:
+      * If the column also matches ``PERCENT_RE`` (e.g. ``rate_pct``),
+        skip — the percent rule owns range-checking for that column.
+      * Values in ``[0, 1]``: pass silently.
+      * Values in ``(1, 100]`` (or negative down to ``-0`` edge): emit
+        ``rate_scaled_like_percent`` at severity ``low``. This records
+        the naming ambiguity in the audit trail without blocking
+        confidence or triggering an unhelpful retry — the SQL is not
+        wrong, the column name is merely informal.
+      * Values outside both ``[0, 1]`` and ``[0, 100]``: emit
+        ``rate_out_of_range`` at severity ``high``. A negative rate or
+        a value above 100 is a real bug (and a retry can legitimately
+        try a different definition).
+    """
     flags: list[SanityFlag] = []
     for col in df.select_dtypes("number").columns:
-        if RATE_RE.search(col):
-            s = df[col].dropna()
-            if len(s) and (s.min() < 0 or s.max() > 1):
-                flags.append(SanityFlag(
-                    rule="rate_out_of_range",
-                    column=col,
-                    message=(
-                        f"{col} outside [0,1]: "
-                        f"min={s.min():.3f} max={s.max():.3f}."
-                    ),
-                    severity="high",
-                ))
+        if not RATE_RE.search(col):
+            continue
+        # If the column name also signals a percent (e.g. ``rate_pct``),
+        # delegate entirely to ``_rule_percent_out_of_range``.
+        if PERCENT_RE.search(col):
+            continue
+
+        s = df[col].dropna()
+        if not len(s):
+            continue
+        lo, hi = float(s.min()), float(s.max())
+
+        in_rate_range = lo >= 0 and hi <= 1
+        in_percent_range = lo >= 0 and hi <= 100
+
+        if in_rate_range:
+            continue  # canonical rate shape, nothing to flag
+
+        if in_percent_range:
+            flags.append(SanityFlag(
+                rule="rate_scaled_like_percent",
+                column=col,
+                message=(
+                    f"{col} is named like a rate but values are on a "
+                    f"0-100 scale (min={lo:.3f} max={hi:.3f}). "
+                    f"Likely a percentage under a rate-style name; "
+                    f"verify the reporting scale is what was asked."
+                ),
+                severity="low",
+            ))
+            continue
+
+        # Outside both plausible ranges — this is a real data bug.
+        flags.append(SanityFlag(
+            rule="rate_out_of_range",
+            column=col,
+            message=(
+                f"{col} outside [0,1] and [0,100]: "
+                f"min={lo:.3f} max={hi:.3f}."
+            ),
+            severity="high",
+        ))
     return flags
 
 
