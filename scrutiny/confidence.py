@@ -22,11 +22,23 @@ Label semantics (FOUNDATION §2.5)
   cleanly matched). Reconciliation-skipped cases do NOT earn HIGH for
   now — see the TODO below.
 
-Current conservative choice: reconciliation-skipped == MEDIUM, even
-when the question is genuinely single-path (e.g., unique customers).
-Rationale: the pipeline today cannot distinguish "not applicable" from
-"planner oversight." Layer 7 should add an explicit planner annotation
-to split these paths; that TODO lives on task #39.
+Skip taxonomy (task #39 — Layer 7)
+----------------------------------
+Reconciliation can be skipped for three distinct reasons, surfaced by
+``ReconciliationResult.skip_category``:
+
+- ``single_sub_question`` — plan has exactly one sub-question. HIGH is
+  eligible only when the sub-question is either backed by a documented
+  ``canonical_metric`` OR flagged ``aggregation_heavy=False`` (simple
+  row counts / lookups). Bespoke aggregation-heavy single paths stay
+  MEDIUM because silent composition errors are most likely there and
+  there is no second path to cross-check.
+- ``complementary_views`` — plan has >=2 sub-questions but the planner
+  intentionally left ``reconciliation_step`` null (different bucketings
+  of one population, e.g. "how does X relate to Y"). Complementary
+  views are not cross-validation; stay MEDIUM.
+- ``insufficient_siblings`` — planner wanted reconciliation but one of
+  the sibling sub-questions didn't produce a result. Stay MEDIUM.
 """
 from __future__ import annotations
 
@@ -90,6 +102,50 @@ def _recon_severity(recon: Any) -> str:
     return getattr(recon, "severity", "low")
 
 
+def _recon_skip_category(recon: Any) -> str | None:
+    """Return the structured skip category emitted by Layer 5, or None.
+
+    ``None`` if recon wasn't skipped. For older ReconciliationResult
+    instances that predate task #39 (no ``skip_category`` attribute),
+    defaults to ``"single_sub_question"`` so they continue to flow
+    through the same conservative MEDIUM path.
+    """
+    if recon is None:
+        return None
+    if not bool(getattr(recon, "skipped", False)):
+        return None
+    return getattr(recon, "skip_category", None)
+
+
+def _single_path_high_eligible(plan: Any) -> bool:
+    """True iff the plan's single sub-question is a good HIGH candidate
+    when reconciliation skipped cleanly.
+
+    Heuristic (task #39): the single sub-question must be either
+      (a) backed by a documented ``canonical_metric`` (the planner
+          matched a well-defined business metric with exactly one
+          definition in the dictionary, so there is nothing to
+          reconcile against — the skip is a legitimate no-op); OR
+      (b) flagged ``aggregation_heavy=False`` by the planner (row
+          counts or simple lookups — no AVG/SUM/rate fragility).
+
+    Plans that are both ``canonical_metric=None`` AND
+    ``aggregation_heavy=True`` stay at MEDIUM: bespoke derivations with
+    aggregation (bucketing, derived delay_days, multi-hop joins with
+    AVG/STDDEV) are where silent composition errors are most likely,
+    and without a second path we have no way to catch them.
+    """
+    subs = list(getattr(plan, "sub_questions", []) or [])
+    if len(subs) != 1:
+        return False
+    sq = subs[0]
+    if getattr(sq, "canonical_metric", None) is not None:
+        return True
+    if not bool(getattr(sq, "aggregation_heavy", True)):
+        return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Derivation
 # ---------------------------------------------------------------------------
@@ -142,6 +198,8 @@ def derive_confidence(
         "recon_skipped": _recon_skipped(reconciliation),
         "recon_passed": _recon_passed(reconciliation),
         "recon_severity": _recon_severity(reconciliation),
+        "recon_skip_category": _recon_skip_category(reconciliation),
+        "single_path_high_eligible": _single_path_high_eligible(plan),
     }
 
     # -- UNABLE paths ---------------------------------------------------
@@ -232,16 +290,63 @@ def derive_confidence(
         )
 
     # -- MEDIUM paths ---------------------------------------------------
-    # Reconciliation skipped: conservative MEDIUM per FOUNDATION §2.5.
-    # See task #39 for the Layer 7 upgrade that would promote genuine
-    # single-path questions to HIGH.
-    if derivation["recon_skipped"]:
+    # Sanity medium beats any recon-based branch: an all-zero column or
+    # high null rate warrants a caveat even if recon was a clean skip.
+    sanity_medium_ids = [
+        o.get("sub_question_id", "?")
+        for o in outcomes
+        if _sanity_severity(o.get("sanity")) == "medium"
+    ]
+    if sanity_medium_ids:
         reason = (
-            "Reconciliation was not applicable (single-path question); "
-            "per current policy this is MEDIUM even when sanity is "
-            "clean, pending a planner annotation to distinguish "
-            "genuinely-single-path from should-have-been-cross-val."
+            f"Sanity flagged medium-severity issue(s) on sub-question(s) "
+            f"{sanity_medium_ids} (e.g., high null rate or all-zero "
+            f"column); pipeline did not block but a caveat is warranted."
         )
+        return ConfidenceResult(
+            label="MEDIUM", reason=reason, derivation=derivation,
+        )
+
+    # Reconciliation skipped: promote to HIGH only when the skip was a
+    # legitimate no-op on a documented canonical metric (task #39).
+    # Complementary-view plans and bespoke single-sub-question plans
+    # stay at MEDIUM because there's no second path to cross-check
+    # and the pipeline can't rule out a silent composition error.
+    if derivation["recon_skipped"]:
+        skip_cat = derivation["recon_skip_category"]
+        if (
+            skip_cat == "single_sub_question"
+            and derivation["single_path_high_eligible"]
+        ):
+            reason = (
+                "Single-path question — either backed by a documented "
+                "canonical metric or a simple (non-aggregation-heavy) "
+                "lookup. Sanity clean and no retries, so the skipped "
+                "reconciliation is a legitimate no-op and confidence "
+                "is HIGH."
+            )
+            return ConfidenceResult(
+                label="HIGH", reason=reason, derivation=derivation,
+            )
+        if skip_cat == "complementary_views":
+            reason = (
+                "Planner emitted multiple complementary-view "
+                "sub-questions (different bucketings of one population); "
+                "there is no second path to cross-check, so confidence "
+                "caps at MEDIUM."
+            )
+        elif skip_cat == "insufficient_siblings":
+            reason = (
+                "Planner requested reconciliation but fewer than 2 "
+                "sibling results arrived; unable to cross-check, so "
+                "confidence caps at MEDIUM."
+            )
+        else:  # single_sub_question without canonical_metric, or unknown
+            reason = (
+                "Single-path question without a documented canonical "
+                "metric (bespoke SQL composition); no second path to "
+                "cross-check, so confidence caps at MEDIUM."
+            )
         return ConfidenceResult(
             label="MEDIUM", reason=reason, derivation=derivation,
         )
@@ -255,24 +360,6 @@ def derive_confidence(
             f"Reconciliation passed at severity=medium "
             f"(delta={getattr(reconciliation, 'delta_pct', None)}); "
             f"surface the caveat but do not block."
-        )
-        return ConfidenceResult(
-            label="MEDIUM", reason=reason, derivation=derivation,
-        )
-
-    # Any medium-severity sanity flags (null_rate_high, all_zero, etc.).
-    if any(
-        _sanity_severity(o.get("sanity")) == "medium" for o in outcomes
-    ):
-        flagged = [
-            o.get("sub_question_id", "?")
-            for o in outcomes
-            if _sanity_severity(o.get("sanity")) == "medium"
-        ]
-        reason = (
-            f"Sanity flagged medium-severity issue(s) on sub-question(s) "
-            f"{flagged} (e.g., high null rate or all-zero column); "
-            f"pipeline did not block but a caveat is warranted."
         )
         return ConfidenceResult(
             label="MEDIUM", reason=reason, derivation=derivation,

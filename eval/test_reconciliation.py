@@ -89,19 +89,34 @@ class ReconCase:
 CASES: list[ReconCase] = [
     # ---- Skip paths ----
     ReconCase(
-        name="no reconciliation_step -> skip",
+        name="no reconciliation_step, single sub-question -> skip (single_sub_question)",
         plan=_mk_plan(None, [(1, "unique_customers")]),
         results=[_mk_result(1, pd.DataFrame({"unique_customers": [96096]}))],
         expectation=lambda r: (
             r.skipped and r.passed and r.severity == "low"
             and r.shape == "skipped"
+            and r.skip_category == "single_sub_question"
         ),
     ),
     ReconCase(
-        name="only one sibling -> skip",
+        name="no reconciliation_step, multi sub-question -> skip (complementary_views)",
+        plan=_mk_plan(None, [(1, None), (2, None)]),
+        results=[
+            _mk_result(1, pd.DataFrame({"bucket": ["a"], "avg": [4.5]})),
+            _mk_result(2, pd.DataFrame({"bucket": ["b"], "avg": [3.2]})),
+        ],
+        expectation=lambda r: (
+            r.skipped and r.passed and r.skip_category == "complementary_views"
+        ),
+    ),
+    ReconCase(
+        name="reconciliation_step set but only one sibling -> skip (insufficient_siblings)",
         plan=_mk_plan("reconcile two defs", [(1, "revenue_from_payments")]),
         results=[_mk_result(1, pd.DataFrame({"revenue": [2_053_000.0]}))],
-        expectation=lambda r: r.skipped and r.passed,
+        expectation=lambda r: (
+            r.skipped and r.passed
+            and r.skip_category == "insufficient_siblings"
+        ),
     ),
 
     # ---- Scalar band coverage ----

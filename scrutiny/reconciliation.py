@@ -71,6 +71,24 @@ class SiblingSummary:
     key_columns: list[str]
 
 
+# Taxonomy for *why* reconciliation was skipped. Downstream (Layer 6
+# confidence) uses this to decide whether a skip is HIGH-eligible
+# (single-path question backed by a documented canonical metric) or
+# only MEDIUM-eligible (complementary views of one population, edge
+# cases, etc.).
+SkipCategory = Literal[
+    "single_sub_question",    # plan has exactly 1 sub-question.
+    "complementary_views",    # plan has >=2 sub-questions but the
+                              # planner intentionally left
+                              # reconciliation_step null (different
+                              # slicings of one population — e.g.,
+                              # "how does X relate to Y").
+    "insufficient_siblings",  # planner wanted reconciliation but we
+                              # didn't get >=2 sibling results (a
+                              # sub-question failed upstream).
+]
+
+
 @dataclass
 class ReconciliationResult:
     # Presenter-facing:
@@ -84,6 +102,8 @@ class ReconciliationResult:
     # Internal / logging-only:
     shape: Literal["scalar", "multi_row", "skipped", "invalid"] = "skipped"
     key_alignment: Literal["ok", "failed", "n/a"] = "n/a"
+    # Non-None only when ``skipped=True``. None on the non-skipped paths.
+    skip_category: SkipCategory | None = None
     mean_delta_pct: float | None = None
     max_delta_pct: float | None = None
     missing_keys_a: list[Any] = field(default_factory=list)
@@ -101,6 +121,7 @@ class ReconciliationResult:
             "reason": self.reason,
             "shape": self.shape,
             "key_alignment": self.key_alignment,
+            "skip_category": self.skip_category,
             "mean_delta_pct": self.mean_delta_pct,
             "max_delta_pct": self.max_delta_pct,
             "missing_keys_a": self.missing_keys_a,
@@ -111,22 +132,55 @@ class ReconciliationResult:
 # ---------------------------------------------------------------------------
 # Skip / trigger logic
 # ---------------------------------------------------------------------------
-def _should_skip(plan: Any, results: list[Any]) -> tuple[bool, str | None]:
+def _should_skip(
+    plan: Any, results: list[Any],
+) -> tuple[bool, str | None, SkipCategory | None]:
     """Decide whether reconciliation is applicable for this plan.
 
-    Returns (skipped, reason). ``skipped=True`` means Layer 5 is a no-op —
-    this is the correct behavior for single-path questions (e.g., unique
-    customer counts), not a failure.
+    Returns ``(skipped, reason, skip_category)``.
+
+    ``skipped=True`` means Layer 5 is a no-op. That is the correct
+    behavior for single-path questions (e.g., unique customer counts)
+    and for complementary-view relationship questions where the planner
+    intentionally set ``reconciliation_step=null``. The ``skip_category``
+    distinguishes those cases so Layer 6 can promote the former to HIGH
+    confidence without raising the latter beyond MEDIUM.
     """
     reconciliation_step = getattr(plan, "reconciliation_step", None)
+    sub_questions = list(getattr(plan, "sub_questions", []) or [])
+
     if not reconciliation_step:
-        return True, "Planner emitted no reconciliation_step."
-    if len(results) < 2:
-        return True, (
-            "Fewer than 2 sibling results — reconciliation requires "
-            "at least two SQL paths to compare."
+        if len(sub_questions) <= 1:
+            return (
+                True,
+                (
+                    "Single-sub-question plan; reconciliation requires a "
+                    "second SQL path, so this is a legitimate no-op."
+                ),
+                "single_sub_question",
+            )
+        return (
+            True,
+            (
+                f"Planner emitted {len(sub_questions)} sub-questions but "
+                "set reconciliation_step=null; treated as complementary "
+                "views of one population (different bucketings/slicings "
+                "are not cross-validation)."
+            ),
+            "complementary_views",
         )
-    return False, None
+
+    if len(results) < 2:
+        return (
+            True,
+            (
+                "Planner requested reconciliation but fewer than 2 "
+                "sibling results arrived — an upstream sub-question "
+                "failed. Treated as a skipped reconciliation."
+            ),
+            "insufficient_siblings",
+        )
+    return False, None, None
 
 
 # ---------------------------------------------------------------------------
@@ -493,7 +547,7 @@ def reconcile(
     Set ``skip_llm=True`` to return without calling Haiku (used by the
     adversarial eval and fast unit tests).
     """
-    skipped, skip_reason = _should_skip(plan, results)
+    skipped, skip_reason, skip_category = _should_skip(plan, results)
     if skipped:
         return ReconciliationResult(
             skipped=True,
@@ -504,6 +558,7 @@ def reconcile(
             reason=skip_reason,
             shape="skipped",
             key_alignment="n/a",
+            skip_category=skip_category,
         )
 
     # Build sibling summaries and attach canonical_metric from the plan.
