@@ -17,9 +17,17 @@ Design notes
   position. Key-alignment failure is severity="high" by itself,
   independent of delta magnitude.
 - Dtype-inference picks the metric column: non-numeric columns are
-  keys; the single numeric column is the metric. Ambiguous shapes
-  (0 or 2+ numeric columns) bail out with a structured failure
-  reason rather than guessing.
+  keys; the single numeric column is the metric. When a sibling has
+  2+ numeric columns the first-pass inference is ambiguous, but the
+  reconciler then falls back to cross-sibling disambiguation: if
+  exactly one numeric column name appears in EVERY sibling, that
+  shared name is used as the metric everywhere, and the extra
+  numeric columns are ignored (neither key nor metric). This handles
+  the common case where the SQL generator emits incidental aid
+  columns (``order_count`` alongside ``total_revenue``) without
+  tripping over them. Only truly ambiguous shapes (0 numeric
+  columns, or 2+ numeric columns with no shared name) bail out
+  with a structured failure reason rather than guessing.
 """
 from __future__ import annotations
 
@@ -210,6 +218,59 @@ def _infer_columns(
             "is ambiguous. Expected exactly one metric column."
         )
     return non_numeric, numeric[0], None
+
+
+def _resolve_columns_across_siblings(
+    frames: list[pd.DataFrame],
+) -> list[tuple[list[str], str | None, str | None]]:
+    """Per-sibling ``(key_columns, metric_column, failure_reason)``.
+
+    First pass: run ``_infer_columns`` on each frame independently.
+    If every sibling already has an unambiguous single numeric column
+    we're done.
+
+    If one or more siblings report *Multiple numeric columns*, fall
+    back to **cross-sibling disambiguation**: look at the set of
+    numeric column names present in each sibling, intersect them, and
+    if exactly one name appears in *every* sibling, use that shared
+    name as the metric everywhere. Extra numeric columns on any
+    sibling are then ignored (treated as neither key nor metric).
+    This handles the common case where the SQL generator emits an
+    incidental aid column (``order_count`` alongside ``total_revenue``)
+    without tripping the reconciler.
+
+    Only truly ambiguous shapes — 0 numeric columns anywhere, or 2+
+    numeric columns with no shared name — fall through unchanged and
+    surface the original failure reason.
+    """
+    per_sibling = [_infer_columns(f) for f in frames]
+    ambiguous = [
+        i for i, (_, _, reason) in enumerate(per_sibling)
+        if reason is not None and "Multiple numeric columns" in reason
+    ]
+    if not ambiguous:
+        return per_sibling
+
+    numeric_sets = [
+        set(f.select_dtypes("number").columns) for f in frames
+    ]
+    if not numeric_sets:
+        return per_sibling
+    common = set.intersection(*numeric_sets)
+    if len(common) != 1:
+        # Either no shared name, or >1 shared name — still ambiguous.
+        return per_sibling
+
+    metric = next(iter(common))
+    resolved: list[tuple[list[str], str | None, str | None]] = []
+    for f in frames:
+        numeric = set(f.select_dtypes("number").columns)
+        # Keys are every column that isn't numeric in this frame.
+        # Extra numeric columns (beyond the shared metric) are dropped
+        # from both keys and metric — they're incidental aid columns.
+        keys = [c for c in f.columns if c not in numeric]
+        resolved.append((keys, metric, None))
+    return resolved
 
 
 # ---------------------------------------------------------------------------
@@ -565,11 +626,16 @@ def reconcile(
     summaries = [_summarize_sibling(r) for r in results]
     _attach_canonical_metric(summaries, plan)
 
-    # Per-sibling column inference — bail loudly if any sibling is
-    # ambiguous. Better to fail obviously than to guess.
-    per_sibling_infer: list[tuple[list[str], str | None, str | None]] = [
-        _infer_columns(r.dataframe) for r in results
-    ]
+    # Per-sibling column inference with cross-sibling disambiguation:
+    # if every sibling has exactly one numeric column, use it; if any
+    # sibling has 2+ numeric columns but there's exactly one numeric
+    # name shared across every sibling, use that shared name as the
+    # metric everywhere (incidental aid columns like ``order_count``
+    # alongside ``total_revenue`` get ignored). Truly ambiguous shapes
+    # still bail out loudly below.
+    per_sibling_infer: list[tuple[list[str], str | None, str | None]] = (
+        _resolve_columns_across_siblings([r.dataframe for r in results])
+    )
     for (_, metric, reason), r in zip(per_sibling_infer, results):
         if reason is not None:
             return ReconciliationResult(

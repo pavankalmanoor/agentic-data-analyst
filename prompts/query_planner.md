@@ -66,7 +66,38 @@ cross-validation.
    that is reconciliation. If the wording is "how does X relate to
    Y" or "what is the distribution of X by Y", that is complementary
    and reconciliation must be null.
-8. **Output only the JSON.** No preamble, no postamble, no Markdown.
+
+8. **Grain alignment — when you DO populate `reconciliation_step`,
+   every participating sub-question must be at the SAME grain.**
+   The downstream reconciler compares the two result sets row-by-row,
+   so mismatched grain breaks the comparison mechanically (delta
+   becomes undefined), not semantically. Concretely:
+   - If the user asked for the metric "by X" (e.g. "revenue by
+     payment method", "revenue by quarter"), EVERY reconciliation
+     sub-question must explicitly say "for each X" or "grouped by X"
+     and produce one row per X. Do NOT emit a grand-total scalar as
+     the "other definition" — a 5-row result and a 1-row scalar
+     cannot be reconciled.
+   - All reconciliation sub-questions must share identical
+     `filters_implied` (same time window, same status exclusions,
+     same payment-type exclusions, etc.). A subtle filter difference
+     will surface as a spurious reconciliation disagreement.
+
+9. **Single-metric-column rule for reconciliation sub-questions.**
+   Each reconciliation sub-question's SQL result must contain
+   exactly ONE numeric metric column — the canonical metric being
+   compared — plus any grouping columns the grain requires. Do NOT
+   add incidental numeric columns (e.g. `order_count`, `avg_value`,
+   `num_customers`) alongside the primary metric in a reconciliation
+   sub-question. Extra numeric columns make the reconciler ambiguous
+   about which column is the metric under comparison and will
+   produce an undefined delta.
+
+   If a downstream consumer needs the extra numeric context
+   (e.g. order_count per payment method for reporting), that's a
+   separate, non-reconciliation sub-question — don't smuggle it in.
+
+10. **Output only the JSON.** No preamble, no postamble, no Markdown.
 
 ## Output format (strict JSON)
 

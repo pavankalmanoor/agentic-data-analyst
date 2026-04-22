@@ -258,6 +258,61 @@ CASES: list[ReconCase] = [
         ),
     ),
     ReconCase(
+        name="multi-row siblings share one numeric name, extra aid col ignored -> low",
+        # Mirrors the Q12 failure mode: the SQL generator emits an
+        # incidental ``order_count`` alongside the canonical
+        # ``total_revenue`` in one sibling. Cross-sibling
+        # disambiguation should pick ``total_revenue`` as the metric
+        # everywhere and reconcile cleanly.
+        plan=_mk_plan(
+            "reconcile revenue by payment type",
+            [(1, "revenue_from_items_and_freight"),
+             (2, "revenue_from_payments")],
+        ),
+        results=[
+            _mk_result(1, pd.DataFrame({
+                "payment_type": ["credit_card", "boleto"],
+                "total_revenue": [1000.0, 500.0],
+                "order_count": [10, 5],
+            })),
+            _mk_result(2, pd.DataFrame({
+                "payment_type": ["credit_card", "boleto"],
+                "total_revenue": [1000.0, 500.0],
+            })),
+        ],
+        expectation=lambda r: (
+            r.severity == "low" and r.passed
+            and r.shape == "multi_row"
+            and r.key_alignment == "ok"
+        ),
+    ),
+    ReconCase(
+        name="multi-row siblings with 2 numeric cols and no shared name -> high",
+        # Both siblings are ambiguous AND there's no overlap in
+        # numeric column names — cross-sibling disambiguation can't
+        # rescue us, so we still bail loudly.
+        plan=_mk_plan(
+            "reconcile two defs",
+            [(1, "a"), (2, "b")],
+        ),
+        results=[
+            _mk_result(1, pd.DataFrame({
+                "payment_type": ["credit_card"],
+                "revenue_a": [1000.0],
+                "order_count": [10],
+            })),
+            _mk_result(2, pd.DataFrame({
+                "payment_type": ["credit_card"],
+                "revenue_b": [1000.0],
+                "avg_value": [100.0],
+            })),
+        ],
+        expectation=lambda r: (
+            r.severity == "high" and not r.passed
+            and r.shape == "invalid"
+        ),
+    ),
+    ReconCase(
         name="shape mismatch (scalar vs multi-row) -> high",
         plan=_mk_plan(
             "reconcile two defs",
