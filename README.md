@@ -2,6 +2,8 @@
 
 A multi-layer LLM pipeline that answers business questions against a relational database by writing SQL, verifying its own answers, and reporting a calibrated confidence label. Built on the Olist Brazilian e-commerce dataset (9 tables, ~100K orders).
 
+Generating SQL with an LLM is the easy part. Making the answer trustworthy — knowing when to be confident, when to hedge, and when to refuse — is what this project works on.
+
 Given a natural-language question, the system routes it through six layers — planner, SQL generator, sanity checker, reconciler, confidence deriver, presenter — and emits a four-section analyst report labeled `HIGH`, `MEDIUM`, `LOW`, or `UNABLE`. The label is derived deterministically from structured signals (did the SQL execute, did sanity rules pass, did two independent SQL paths agree); it is **not** an LLM grading another LLM.
 
 ---
@@ -88,6 +90,20 @@ Every commit message carries the N=3 evidence that justified it. The eval harnes
 **Adversarial test coverage for the reconciler.** 14 rule-based cases in `eval/test_reconciliation.py` covering key misalignment, shape mismatch, ambiguous inference, and the recent cross-sibling common-column heuristic — all running without an API call so they're free to run in CI.
 
 **Honest refusal on unanswerable questions.** Planner returns `UNABLE` with a reason for questions the dataset cannot support (CAC without marketing spend, profit margin without COGS, future revenue). The pipeline short-circuits — no SQL is generated, no confidence is fabricated.
+
+---
+
+## Problems worth solving
+
+A system like this breaks in characteristic ways, and most of the engineering work in this repo is about recognizing each failure mode and deciding how to respond to it honestly. Four of them are worth calling out.
+
+**Metric ambiguity without a natural decomposition.** A canonical question like *"revenue by payment method, and does it differ by calculation approach?"* fans out into two sibling SQL paths — items-and-freight sum vs. payment-value sum. At the aggregate level these two definitions agree to within 0.03%. When sliced per payment_type, they can disagree by 33% or more, because the items-and-freight definition has no natural per-payment_type decomposition: attributing the full order revenue to every payment method used on that order double-counts multi-method orders. The generator picked exactly this pathology. The reconciler flagged it deterministically, the confidence layer returned `LOW`, and the report surfaces the disagreement rather than picking a winner. The right fix here is not to suppress the divergence; it's to admit that `LOW` is the honest label when two valid definitions genuinely disagree, and document the architectural follow-up (proportional allocation, or a planner rule against fanning out at incompatible grains) as future work.
+
+**Generator drift on look-alike keys.** The Olist dataset has two customer identifiers that are one letter apart and mean very different things: `customer_id` (per-order identity, 99,441 distinct) and `customer_unique_id` (person-level identity, 96,096 distinct). Early in the project the SQL generator occasionally used the wrong one for person-level aggregations, which inflates repeat-purchase rates by several percentage points. The evaluation harness pinned Q8's expected confidence to `[MEDIUM, LOW]` as a guardrail against this — a honest admission that the system couldn't be trusted on that question yet. Over time the generator stabilized to the correct key, and the expected label was promoted to `[HIGH, MEDIUM]` to reflect real behavior. Expected outcomes in an LLM eval are a policy choice, not ground truth; the useful thing is keeping them honest, and having a deferred ticket for a sanity rule ready for the day the regression returns.
+
+**Shape mismatch in cross-validation.** When the planner fanned out a metric, the two resulting SQL paths sometimes returned incompatible result shapes: one grouped by payment_type with a single metric column, the other a scalar grand total; or one with two numeric columns (a metric plus an incidental aid column like `order_count`) and the other with just the metric. The reconciler can't compare row-by-row when the shapes don't align, so every such trial landed `LOW` for a mechanical reason rather than a semantic one. Two complementary fixes: a planner-prompt rule requiring reconciliation sub-questions to share grain and filters, and a deterministic reconciler heuristic that picks a common numeric column name across siblings when one of them has extra columns. The planner rule alone wasn't enough — prompt guidance to the planner doesn't reliably reach the downstream SQL generator — which is why the deterministic fallback in the reconciler mattered. That's the general lesson: when behavior has to cross prompt boundaries, pair probabilistic guidance with a deterministic check.
+
+**Honest refusal over fluent fabrication.** Three of the 15 evaluation questions are deliberately unanswerable from the Olist data alone: customer acquisition cost (no marketing spend), profit margin (no COGS), next-quarter revenue (no data past 2018). The temptation with LLM systems is to always produce something — a proxy answer, an extrapolation, a best-guess caveat. The planner here refuses cleanly with `UNABLE` and a reason, and the pipeline short-circuits before any SQL runs. All nine trials on those three questions landed `UNABLE` in the final N=3 run. The discipline is producing nothing when nothing is true, and making the refusal a first-class output of the system rather than a failure of it.
 
 ---
 
